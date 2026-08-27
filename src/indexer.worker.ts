@@ -1,10 +1,10 @@
 /// <reference lib="webworker" />
 import { hasMboxEnvelopeStart, MboxStreamIndexer } from './mbox-scanner';
+import { fileReadRanges } from './file-read-plan';
 import type { MessageRecord } from './parser';
 
 const ctx: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
 let cancelled = false;
-const READ_CHUNK_BYTES = 4 * 1024 * 1024;
 ctx.onmessage = (event: MessageEvent<{ type: string; file?: File; archiveId?: string; gzip?: boolean }>) => {
   if (event.data.type === 'cancel') { cancelled = true; return; }
   if (event.data.type === 'start' && event.data.file && event.data.archiveId) {
@@ -63,11 +63,12 @@ async function indexFile(file: File, archiveId: string, gzip: boolean): Promise<
       consume(value);
     }
   } else {
-    // File.stream() commonly delivers 64 KiB chunks. Four MiB slices cut
-    // stream/message overhead by 64× while still keeping worker memory fixed.
-    for (let offset = 0; offset < file.size; offset += READ_CHUNK_BYTES) {
+    // File.stream() commonly delivers 64 KiB chunks. The bounded 32 MiB plan
+    // avoids thousands of cold-disk Blob-read dispatches without scaling
+    // worker memory with archive size.
+    for (const { start, end } of fileReadRanges(file.size)) {
       if (cancelled) { ctx.postMessage({ type: 'cancelled' }); return; }
-      consume(new Uint8Array(await file.slice(offset, Math.min(file.size, offset + READ_CHUNK_BYTES)).arrayBuffer()));
+      consume(new Uint8Array(await file.slice(start, end).arrayBuffer()));
     }
   }
   if (!envelopeChecked) {
