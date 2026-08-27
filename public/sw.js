@@ -1,4 +1,4 @@
-const CACHE = 'paper-trail-shell-v1';
+const CACHE = 'paper-trail-shell-v2';
 const CORE = ['/', '/index.html', '/manifest.webmanifest', '/offline.html', '/icon.svg', '/assets/hero-archive.webp', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -26,7 +26,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== location.origin) return;
   event.respondWith((async () => {
-    const cached = await caches.match(event.request, { ignoreSearch: url.pathname === '/' });
+    const cached = await caches.match(url.pathname, { ignoreSearch: url.pathname === '/' });
     if (cached) return cached;
     try {
       const response = await fetch(event.request);

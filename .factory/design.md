@@ -41,7 +41,7 @@ All normal text combinations meet 4.5:1; color is always paired with a label, ic
 ## Interaction grammar
 
 - Primary buttons depress their offset print shadow on activation.
-- Import progress advances as a striped registration bar with explicit count, bytes, time, and Cancel.
+- Import progress advances as a striped registration bar with explicit count, bytes, rate, and Cancel.
 - Selected messages gain a blue left registration stripe plus a checked control; selection never relies on color alone.
 - Opening a message moves from its row into a reading sheet; Back returns focus to the originating row.
 - Async changes are announced through one polite live region. Errors state the failed job and the next action.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeHeader, formatBytes, indexRecordFromPrefix, parseMessage, safeFilename } from './parser';
+import { BLOOM_BYTES, bloomAdd, bloomHas, decodeHeader, formatBytes, indexRecordFromPrefix, parseMessage, safeFilename } from './parser';
 import { createZip } from './zip';
 
 const encode = (value: string) => new TextEncoder().encode(value);
@@ -26,6 +26,14 @@ describe('mail parsing', () => {
     expect(decodeHeader('=?UTF-8?Q?hello_=E2=9C=93?=')).toBe('hello ✓');
     expect(safeFilename('../../bad:name')).toBe('_.._bad_name');
     expect(formatBytes(1024)).toBe('1.0 KB');
+  });
+
+  it('keeps a compact, case-insensitive whole-message word index', () => {
+    const bloom = new Uint8Array(BLOOM_BYTES);
+    bloomAdd(bloom, 'needleinahaystack');
+    const encoded = btoa(String.fromCharCode(...bloom));
+    expect(bloomHas(encoded, 'NeedleInAHaystack')).toBe(true);
+    expect(bloomHas(encoded, 'definitely-absent')).toBe(false);
   });
 });
 

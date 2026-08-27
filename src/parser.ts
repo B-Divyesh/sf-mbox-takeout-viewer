@@ -11,6 +11,7 @@ export interface MessageRecord {
   messageId: string;
   snippet: string;
   search: string;
+  bloom?: string;
 }
 
 export interface ParsedAttachment {
@@ -89,8 +90,42 @@ export function indexRecordFromPrefix(prefix: Uint8Array, base: Omit<MessageReco
     date,
     messageId: headers['message-id'] || '',
     snippet,
-    search: `${subject}\n${from}\n${to}\n${cleanBody}`.toLocaleLowerCase().slice(0, 180_000),
+    search: `${subject}\n${from}\n${to}\n${headerText}\n${cleanBody}`.toLocaleLowerCase().slice(0, 4_096),
   };
+}
+
+export const BLOOM_BYTES = 1024;
+
+export function bloomAdd(bloom: Uint8Array, token: string): void {
+  const [a, b] = bloomHashes(token);
+  for (let i = 0; i < 4; i++) {
+    const bit = (a + i * b + i * i) % (bloom.length * 8);
+    bloom[bit >>> 3] |= 1 << (bit & 7);
+  }
+}
+
+export function bloomHas(encoded: string | undefined, token: string): boolean {
+  if (!encoded || !token) return false;
+  try {
+    const binary = atob(encoded);
+    const [a, b] = bloomHashes(token.toLocaleLowerCase());
+    for (let i = 0; i < 4; i++) {
+      const bit = (a + i * b + i * i) % (binary.length * 8);
+      if (!(binary.charCodeAt(bit >>> 3) & (1 << (bit & 7)))) return false;
+    }
+    return true;
+  } catch { return false; }
+}
+
+function bloomHashes(value: string): [number, number] {
+  let first = 2166136261;
+  let second = 5381;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    first = Math.imul(first ^ code, 16777619) >>> 0;
+    second = (Math.imul(second, 33) ^ code) >>> 0;
+  }
+  return [first, second || 1];
 }
 
 export function parseMessage(raw: Uint8Array): ParsedMessage {

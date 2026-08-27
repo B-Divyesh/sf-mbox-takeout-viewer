@@ -1,7 +1,7 @@
 import './styles.css';
 import IndexWorker from './indexer.worker?worker';
 import { deleteArchive, getArchives, getMessages, saveArchive, saveMessages, type ArchiveRecord } from './db';
-import { formatBytes, parseMessage, safeFilename, type MessageRecord, type ParsedMessage } from './parser';
+import { bloomHas, formatBytes, parseMessage, safeFilename, type MessageRecord, type ParsedMessage } from './parser';
 import { createZip, type ZipEntry } from './zip';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -28,14 +28,16 @@ interface AppState {
   parsed?: ParsedMessage;
   pro: boolean;
   expected?: ArchiveRecord;
+  online: boolean;
 }
 
 const state: AppState = {
-  view: 'welcome', archives: [], records: [], query: '', sender: '', fromDate: '', toDate: '',
+  view: 'welcome', archives: [], records: [], query: '', sender: '', fromDate: '', toDate: '', online: navigator.onLine,
   hasAttachments: false, sort: 'newest', selected: new Set(), page: 0, pro: readCachedLicense(),
 };
 let worker: Worker | undefined;
 let saveQueue = Promise.resolve();
+let persistenceFailed = false;
 let focusReturn: HTMLElement | null = null;
 let activeObjectUrls: string[] = [];
 
@@ -53,7 +55,7 @@ async function init(): Promise<void> {
 
 function chrome(content: string): string {
   return `<div class="shell">
-    ${navigator.onLine ? '' : '<div class="offline-banner" role="status">Offline — local archives and saved indexes still work.</div>'}
+    ${state.online ? '' : '<div class="offline-banner" role="status">Offline — local archives and saved indexes still work.</div>'}
     <header class="site-header">
       <a class="brand" href="#" data-action="home" aria-label="Paper Trail home"><span class="brand-mark" aria-hidden="true"></span>Paper Trail</a>
       <div class="top-actions">
@@ -64,7 +66,7 @@ function chrome(content: string): string {
     <main id="main">${content}</main>
     <footer class="site-footer"><span>Private by design. Generated risograph artwork disclosed.</span><nav class="footer-links" aria-label="Legal"><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/B-Divyesh/sf-mbox-takeout-viewer" rel="noreferrer">Source</a></nav></footer>
     <div class="toast-dock" id="toastDock" aria-live="polite" aria-atomic="true"></div>
-    <input class="sr-only" id="fileInput" type="file" accept=".mbox,.gz,.mbox.gz,application/mbox,application/gzip" tabindex="-1" />
+    <input class="sr-only" id="fileInput" type="file" aria-label="Choose an MBOX archive" accept=".mbox,.gz,.mbox.gz,application/mbox,application/gzip" tabindex="-1" />
   </div>`;
 }
 
@@ -83,7 +85,7 @@ function renderWelcome(): void {
     <div><p class="eyebrow">Your Takeout, finally readable</p><h1>Find the one email in 20&nbsp;GB.</h1>
       <p class="lede">Open a Gmail Takeout archive right here. Paper Trail streams it from disk, builds a local index, and lets you search, read, and extract what matters.</p>
       <ul class="promise-list"><li>No upload. Your mail never crosses the network.</li><li>Works with .mbox and streamed .mbox.gz archives.</li><li>Resume saved indexes and export original .eml files.</li></ul>
-      <div class="hero-actions"><button class="primary" data-action="open">Open an MBOX file</button><button data-action="sample">Try a tiny sample</button></div>
+      <div class="hero-actions"><button class="primary" data-action="open">Open an MBOX file</button><button data-action="sample">Try a tiny sample</button><button class="ghost" data-action="import-index">Import saved index</button></div>
       <p class="file-note">Chrome and Edge can reconnect files after refresh. Firefox and Safari ask you to choose the same file again.</p>
     </div>
     <div class="hero-art-wrap"><span class="stamp">Local-only indexing</span><img class="hero-art" src="/assets/hero-archive.webp" width="1152" height="768" fetchpriority="high" alt="A giant accordion-fold archive passing through a hand-cranked indexer into sorted message cards" /></div>
@@ -104,7 +106,7 @@ function renderIndexing(): void {
 function filteredRecords(): MessageRecord[] {
   const terms = state.query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
   let list = state.records.filter((record) => {
-    if (terms.length && !terms.every((term) => record.search.includes(term))) return false;
+    if (terms.length && !terms.every((term) => record.search.includes(term) || bloomHas(record.bloom, term))) return false;
     if (state.sender && !record.from.toLocaleLowerCase().includes(state.sender.toLocaleLowerCase())) return false;
     if (state.fromDate && (!record.date || record.date.slice(0, 10) < state.fromDate)) return false;
     if (state.toDate && (!record.date || record.date.slice(0, 10) > state.toDate)) return false;
@@ -130,14 +132,15 @@ function renderWorkspace(): void {
   app.innerHTML = chrome(`<section class="workspace"><div class="workspace-head"><div><p class="eyebrow">Local archive</p><h1>${esc(archive.name)}</h1><p class="archive-meta">${archive.count.toLocaleString()} messages · ${formatBytes(archive.size)} · indexed ${formatDate(archive.indexedAt)}</p></div>
     <div class="workspace-actions"><button data-action="reconnect">${state.file ? 'File connected' : 'Reconnect file'}</button><button data-action="new-archive">Open another</button></div></div>
     <div class="workspace-grid"><aside class="filter-panel" aria-labelledby="filter-title"><h2 id="filter-title">Search the trail</h2>
-      <div class="field"><label for="search">Words in message</label><div class="search-box"><input id="search" type="search" value="${esc(state.query)}" placeholder="invoice, subject, phrase…" autocomplete="off" /></div></div>
+      <div class="field"><label for="search">Words in message</label><div class="search-box"><input id="search" type="search" value="${esc(state.query)}" placeholder="invoice sender project" autocomplete="off" /></div></div>
       <div class="field"><label for="sender">From contains</label><input id="sender" type="text" value="${esc(state.sender)}" placeholder="name@example.com" /></div>
       <div class="field"><label for="fromDate">From date</label><input id="fromDate" type="date" value="${state.fromDate}" /></div>
       <div class="field"><label for="toDate">To date</label><input id="toDate" type="date" value="${state.toDate}" /></div>
+      <label class="check-all"><input id="hasAttachments" type="checkbox" ${state.hasAttachments ? 'checked' : ''} /> Has attachments</label>
       <div class="field"><label for="sort">Order</label><select id="sort"><option value="newest" ${state.sort === 'newest' ? 'selected' : ''}>Newest first</option><option value="oldest" ${state.sort === 'oldest' ? 'selected' : ''}>Oldest first</option><option value="archive" ${state.sort === 'archive' ? 'selected' : ''}>Archive order</option></select></div>
       <button class="ghost" data-action="clear-filters">Clear filters</button>
       <p class="result-status" aria-live="polite"><strong>${filtered.length.toLocaleString()}</strong> of ${state.records.length.toLocaleString()} messages<br><strong>${state.selected.size}</strong> selected</p>
-      <div class="selection-actions"><button class="primary" data-action="export-eml" ${!state.selected.size ? 'disabled' : ''}>Export selected .eml ZIP</button><button data-action="export-index">Export index CSV</button></div>
+      <div class="selection-actions"><button class="primary" data-action="export-eml" ${!state.selected.size ? 'disabled' : ''}>Export selected .eml ZIP</button><button data-action="export-index">Export index CSV</button><button data-action="export-index-json">Back up reusable index</button></div>
       <p class="pro-note">Free: view, search, attachments, and exports up to 1,000 messages. <button class="ghost" data-action="license">${state.pro ? 'Bulk export unlocked ★' : 'Unlock unlimited bulk export'}</button></p>
     </aside>
     <section class="message-desk" aria-label="Messages"><div class="list-toolbar"><label class="check-all"><input id="selectPage" type="checkbox" ${shown.length && shown.every((record) => state.selected.has(record.id)) ? 'checked' : ''} /> Select this page</label><span>Page ${state.page + 1} of ${pages}</span></div>
@@ -164,8 +167,8 @@ function renderReader(): void {
 }
 
 function bindGlobalEvents(): void {
-  window.addEventListener('online', render);
-  window.addEventListener('offline', render);
+  window.addEventListener('online', () => { state.online = true; render(); });
+  window.addEventListener('offline', () => { state.online = false; render(); });
   document.addEventListener('click', (event) => {
     const target = (event.target as Element).closest<HTMLElement>('[data-action]');
     if (!target) return;
@@ -173,12 +176,14 @@ function bindGlobalEvents(): void {
     if (action === 'home' || action === 'new-archive') { event.preventDefault(); state.view = 'welcome'; resetArchive(); render(); }
     else if (action === 'open') void chooseFile();
     else if (action === 'sample') void openSample();
+    else if (action === 'import-index') void importIndex();
     else if (action === 'cancel-index') { worker?.postMessage({ type: 'cancel' }); }
     else if (action === 'clear-filters') { clearFilters(); render(); }
     else if (action === 'back') { state.view = 'workspace'; state.parsed = undefined; render(); queueMicrotask(() => focusReturn?.focus()); }
     else if (action === 'reconnect') void reconnectArchive();
     else if (action === 'export-eml') void exportSelected();
     else if (action === 'export-index') exportIndex();
+    else if (action === 'export-index-json') exportIndexJson();
     else if (action === 'download-eml') void downloadCurrentEml();
     else if (action === 'print') window.print();
     else if (action === 'license') showLicenseDialog();
@@ -202,6 +207,7 @@ function bindViewEvents(): void {
     state[key] = (event.target as HTMLInputElement).value; state.page = 0; debounceRender();
   });
   updateFilter('search', 'query'); updateFilter('sender', 'sender'); updateFilter('fromDate', 'fromDate'); updateFilter('toDate', 'toDate');
+  document.querySelector<HTMLInputElement>('#hasAttachments')?.addEventListener('change', (event) => { state.hasAttachments = (event.target as HTMLInputElement).checked; state.page = 0; render(); });
   document.querySelector<HTMLSelectElement>('#sort')?.addEventListener('change', (event) => { state.sort = (event.target as HTMLSelectElement).value as AppState['sort']; state.page = 0; render(); });
   const dropZone = document.querySelector<HTMLElement>('#dropZone');
   dropZone?.addEventListener('dragover', (event) => { event.preventDefault(); });
@@ -249,11 +255,15 @@ function startIndexing(file: File, archiveId: string, gzip: boolean): void {
   worker = currentWorker;
   const started = performance.now();
   saveQueue = Promise.resolve();
+  persistenceFailed = false;
   currentWorker.onmessage = (event: MessageEvent<{ type: string; records?: MessageRecord[]; bytes?: number; expandedBytes?: number; count?: number; total?: number; message?: string }>) => {
     const data = event.data;
     if (data.type === 'batch' && data.records) {
       state.records.push(...data.records);
-      saveQueue = saveQueue.then(() => saveMessages(data.records!));
+      saveQueue = saveQueue.then(() => saveMessages(data.records!)).catch(() => {
+        if (!persistenceFailed) toast('Browser storage is full. Search still works in this tab, but the index cannot be resumed later.', 'error', 8000);
+        persistenceFailed = true;
+      });
     } else if (data.type === 'progress') {
       const ratio = gzip ? Math.min(.98, (data.expandedBytes || 0) / Math.max(file.size * 1.8, 1)) : (data.bytes || 0) / file.size;
       updateProgress(ratio, data.bytes || 0, data.count || state.records.length, started, gzip);
@@ -274,7 +284,7 @@ async function finishIndex(count: number): Promise<void> {
   if (!state.archive) return;
   state.archive.count = count;
   state.archive.indexedAt = new Date().toISOString();
-  await saveArchive(state.archive).catch(() => toast('The index works now, but this browser could not save it for later.', 'error'));
+  if (!persistenceFailed) await saveArchive(state.archive).catch(() => toast('The index works now, but this browser could not save it for later.', 'error'));
   state.archives = [state.archive, ...state.archives.filter((item) => item.id !== state.archive!.id)];
   state.view = 'workspace';
   worker?.terminate(); worker = undefined;
@@ -390,6 +400,31 @@ function exportIndex(): void {
   downloadBlob(new Blob([rows.map((row) => row.map(quote).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${safeFilename(state.archive?.name || 'archive')}-index.csv`);
 }
 
+function exportIndexJson(): void {
+  if (!state.archive) return;
+  const { handle: _handle, ...archive } = state.archive;
+  const payload = JSON.stringify({ kind: 'paper-trail-index', version: 1, archive, records: state.records });
+  downloadBlob(new Blob([payload], { type: 'application/json' }), `${safeFilename(state.archive.name)}-paper-trail-index.json`);
+}
+
+async function importIndex(): Promise<void> {
+  const picker = document.createElement('input');
+  picker.type = 'file'; picker.accept = 'application/json,.json';
+  picker.addEventListener('change', async () => {
+    const file = picker.files?.[0]; if (!file) return;
+    try {
+      const data = JSON.parse(await file.text()) as { kind?: string; version?: number; archive?: ArchiveRecord; records?: MessageRecord[] };
+      if (data.kind !== 'paper-trail-index' || data.version !== 1 || !data.archive || !Array.isArray(data.records)) throw new Error('Not a Paper Trail index backup.');
+      const archive = { ...data.archive, handle: undefined, count: data.records.length, indexedAt: new Date().toISOString() };
+      if (!archive.id || !archive.name || !Number.isFinite(archive.size) || data.records.some((item) => item.archiveId !== archive.id || !Number.isFinite(item.start) || !Number.isFinite(item.end))) throw new Error('This index backup is incomplete or damaged.');
+      await deleteArchive(archive.id).catch(() => undefined); await saveMessages(data.records); await saveArchive(archive);
+      state.archive = archive; state.records = data.records; state.file = undefined; state.expected = archive; state.view = 'workspace'; state.archives = [archive, ...state.archives.filter((item) => item.id !== archive.id)]; render();
+      toast(`Imported ${archive.count.toLocaleString()} records. Reconnect ${archive.name} to open messages.`, 'success', 8000);
+    } catch (error) { toast(error instanceof Error ? error.message : 'Could not import this index backup.', 'error'); }
+  });
+  picker.click();
+}
+
 function safeEmailHtml(input: string, attachments: ParsedMessage['attachments']): string {
   const doc = new DOMParser().parseFromString(input, 'text/html');
   doc.querySelectorAll('script,iframe,frame,object,embed,form,input,button,textarea,select,meta,base,link').forEach((node) => node.remove());
@@ -421,8 +456,8 @@ function showLicenseDialog(message = ''): void {
   const existing = document.querySelector('.modal-backdrop'); existing?.remove();
   const overlay = document.createElement('div'); overlay.className = 'modal-backdrop';
   overlay.innerHTML = `<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="license-title"><p class="eyebrow">One-time unlock</p><h2 id="license-title">Bulk archive export</h2>
-    ${message ? `<p class="license-status">${esc(message)}</p>` : ''}<p>The free viewer includes unlimited search, reading, attachment downloads, index CSV, and EML ZIPs up to 1,000 messages. The one-time unlock removes that ZIP limit and adds bulk PDF workflow access.</p>
-    <p><strong>Launch price: shown at secure checkout.</strong> Sociobot/Dodo is the merchant of record. No subscription.</p>
+    ${message ? `<p class="license-status">${esc(message)}</p>` : ''}<p>The free viewer includes unlimited search, reading, attachment downloads, index CSV, and EML ZIPs up to 1,000 messages. The one-time unlock removes that ZIP limit.</p>
+    <p><strong>$19 USD, one time.</strong> Sociobot/Dodo is the merchant of record. No subscription.</p>
     <a class="button primary" href="${API_BASE}/products/${PRODUCT}/checkout">See price and buy securely</a>
     <hr><div class="field"><label for="licenseToken">Have a license? Paste it</label><input id="licenseToken" type="text" autocomplete="off" spellcheck="false" placeholder="License token" /></div>
     <p id="licenseMessage" aria-live="polite">${state.pro ? 'This device has an active bulk-export license.' : 'Verification needs a brief internet connection.'}</p>
@@ -492,7 +527,7 @@ function registerServiceWorker(): void {
 }
 
 function resetArchive(): void { worker?.terminate(); worker = undefined; state.archive = undefined; state.file = undefined; state.records = []; state.selected.clear(); state.expected = undefined; clearFilters(); }
-function clearFilters(): void { state.query = ''; state.sender = ''; state.fromDate = ''; state.toDate = ''; state.page = 0; }
+function clearFilters(): void { state.query = ''; state.sender = ''; state.fromDate = ''; state.toDate = ''; state.hasAttachments = false; state.page = 0; }
 function revokeObjectUrls(): void { for (const url of activeObjectUrls) URL.revokeObjectURL(url); activeObjectUrls = []; }
 function downloadBlob(blob: Blob, name: string): void { const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 30_000); }
 function displayAddress(value: string): string { return value.replace(/<[^>]+>/g, '').replace(/^"|"$/g, '').trim() || value; }
