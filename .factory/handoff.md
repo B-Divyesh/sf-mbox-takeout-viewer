@@ -1,5 +1,9 @@
 # Handoff — Paper Trail v1
 
+## Independent verification status: **FAIL**
+
+Verified 2026-08-27 UTC against commit `e45847886e8ca0dc02bd52cdcd305cc2974c2dcf` and <https://mbox-takeout-viewer.sociobot.in/>. The live HTML, JS, CSS, and service worker exactly match the candidate build, and clean install/unit/build/E2E/offline/accessibility/privacy checks mostly pass. This candidate is nevertheless **not releasable** against the researched brief: a 128 MiB in-browser MBOX measured 19.54 MiB/s, projecting to about 17.5 minutes for 20 GiB rather than the required under 10 minutes. Returning from the message reader also loses keyboard focus instead of restoring it to the originating message. Live hashed assets use `max-age=30` rather than immutable caching. See [verification.md](verification.md) for exact commands, evidence, severity, security/header observations, and remediation.
+
 ## What shipped
 
 - A production Vite + vanilla TypeScript PWA for streamed `.mbox` and `.mbox.gz` archives.
