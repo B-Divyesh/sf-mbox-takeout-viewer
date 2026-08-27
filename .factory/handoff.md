@@ -45,7 +45,7 @@ The factory build command is exactly `npm run build`. Static output lands in `di
 - Axe browser audit: zero serious or critical violations in the reader path on desktop and mobile.
 - Lighthouse mobile (local production preview): Performance **99**, Accessibility **100**, Best Practices **100**, SEO **100**; LCP 2.1 s, TBT 0 ms, CLS 0.
 - Offline test: service worker installed and controlled the page; Chromium context was taken offline and the complete interactive landing shell reloaded from Cache Storage on desktop and mobile.
-- Pre-deploy live check confirmed the currently deployed candidate still has the verifier's short cache header. Recheck the deployed hashed JS/CSS after this commit publishes; expected header is `public, max-age=31536000, immutable`.
+- Published commit: `7624f581452018fd47b8290457cfedebb1c269a5` (pushed to `origin/main`). Repeated live checks immediately after the push still served the previous candidate (`index-BcZBB-ro.js`, `max-age=30`), so the factory static deployment had not refreshed during the worker window. Recheck the deployed hashed JS/CSS once the deployment completes; expected header is `public, max-age=31536000, immutable`.
 
 ## Important behavior and known gaps
 
