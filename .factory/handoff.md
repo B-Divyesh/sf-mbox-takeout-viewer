@@ -1,35 +1,57 @@
-# Handoff — independent verification 2: FAIL
+# Handoff — repair 2: PASS
 
-Candidate `1d32e356ee15b0011a2a8512c3bed942892e5a03` was independently verified on 2026-08-27 UTC against <https://mbox-takeout-viewer.sociobot.in/>. No product code was changed.
+Repaired and deployed the QA failures from `64f6b133b4c154d6be8bee03b12ea96009f445a3`. The functional deployment is commit `db8428c` at <https://mbox-takeout-viewer.sociobot.in/>.
 
-## Release verdict
+## What changed
 
-**FAIL — do not release this candidate.** The live deployment now matches the candidate byte-for-byte for its generated JS and CSS and the core PWA works, but two acceptance defects remain:
+- Reworked the cold MBOX scanner path so it uses native `Uint8Array#indexOf` to locate MBOX envelope newlines and only runs JavaScript tokenization across the existing bounded 192 KiB searchable window per message. A five-byte carry buffer preserves envelopes split across File slices; offsets, bounded memory, local-only parsing, Bloom search, gzip behavior, and existing UI flows are retained.
+- Replaced the scanner's allocation-heavy repeated-token `Map` with a bounded typed-array hash table. Repeated newsletter/thread terms no longer repeatedly update the Bloom filter.
+- Kept the existing deterministic 128 MiB browser test and its stricter `>35 MiB/s` guard (the brief equivalence is >=34.13 MiB/s). It now attaches a JSON measurement artifact and prints its measured rate.
+- Added `public/staticwebapp.config.json`, which Vite copies to the deployed output. Standard Static Web Apps now serves content-hashed `/assets/*.js` and `/assets/*.css` with `Cache-Control: public, max-age=31536000, immutable`, while `sw.js` and `index.html` revalidate.
+- Added a site CSP, `Permissions-Policy`, `X-Frame-Options: DENY`, `X-Content-Type-Options`, and referrer policy in both the Standard SWA config and `_headers` fallback. The CSP permits only same-origin app resources, data/blob images and workers, and the existing optional Sociobot license-verification endpoint.
+- Extended the header regression script to verify the emitted Standard SWA configuration, not only `_headers`.
 
-- **P1:** `npm run test:e2e` fails reproducibly in the desktop cold-file 128 MiB throughput guard before the archive reaches 128 messages within five seconds. Captured progress was 115/128 at 25.2 MB/s, below the brief's 34.13 MiB/s requirement for 20 GiB in ten minutes.
-- **P2:** deployed content-hashed JS/CSS return only `Cache-Control: public, must-revalidate, max-age=30`; immutable asset caching declared in the built `_headers` file is not applied by the host.
+## Verification
 
-**P3:** Live responses lack site CSP, Permissions-Policy, and frame-embedding protection. The email iframe itself was sandboxed and safely sanitised in adversarial testing.
-
-## What passed
-
-- Clean `npm ci`, `npm test` (8/8), TypeScript/Vite production build, and built-header assertion.
-- Normal MBOX flow (index/search/read/ZIP), gzip read, invalid-file recovery, desktop keyboard focus return, 390 px mobile layout, reduced motion, axe serious/critical checks, and no console/page errors.
-- Hostile HTML email tests: script/event/iframe/remote-image/javascript URL stripping and no outbound hostile request.
-- Live page requests stayed same-origin; no analytics or third-party fonts/scripts were observed. Optional Sociobot license verification is the only source-level outbound fetch.
-- PWA controlled offline reload and a QA-controlled service-worker update toast. Live Lighthouse: 100 performance, 100 accessibility, 100 best practices, 100 SEO; LCP 1.7 s, TBT 0 ms, CLS 0.
-
-## How to reproduce
+From a clean installed checkout:
 
 ```bash
 npm ci
-npm test
 npm run build
 npm run test:headers
+npm test
 npm run test:e2e
-npx playwright test --grep 'sustains the 20 GiB' --reporter=line
 ```
 
-Install the repository-pinned browser first if needed: `npx playwright install chromium`.
+All passed: 8/8 Vitest tests; production build; header configuration check; and Playwright 6 passed / 2 intentional mobile skips. The full E2E suite covers the local index/search/read/export workflow, offline controlled reload, gzip streaming/seek, axe serious/critical checks, mobile layout, and console errors.
 
-The detailed evidence, exact live hashes, headers, browser tests, and remediation is in [verification-2.md](verification-2.md).
+Focused cold-file regression evidence (desktop Chromium, deterministic 128 MiB fixture; guard remains `>35 MiB/s`):
+
+| Run | MiB/s |
+| --- | ---: |
+| Full E2E suite | 47.19 |
+| Repeat 1 | 48.55 |
+| Repeat 2 | 45.86 |
+| Repeat 3 | 46.40 |
+
+All runs clear both the 35 MiB/s guard and the 34.13 MiB/s brief-equivalent threshold. The source-test benchmark also passed at 64 MiB.
+
+Live deployment checks after deployment:
+
+- Root is HTTPS 200, has no browser console errors, title/lang/one h1/main/alt checks pass, and desktop load was 789 ms. Evidence: `/work/.evidence/mbox-takeout-viewer-repair-2/verify.json`.
+- Live hashed JS and CSS return `Cache-Control: public, max-age=31536000, immutable`; `sw.js` returns `no-cache`.
+- Live root and assets return CSP with `frame-ancestors 'none'`, `Permissions-Policy`, and `X-Frame-Options: DENY`.
+- Lighthouse live audit: Performance 100, Accessibility 100, Best Practices 100, SEO 100; LCP 1.7 s, TBT 0 ms, CLS 0. Evidence: `/work/.evidence/mbox-takeout-viewer-repair-2/lighthouse.json`.
+
+## Deploy
+
+```bash
+npm run build
+/opt/fleet/lib/deploy-static.sh mbox-takeout-viewer dist
+```
+
+The deployment completed successfully to Azure Standard Static Web Apps; the custom domain returned HTTPS 200 and was then header-verified.
+
+## Known gaps / next steps
+
+No known acceptance gaps. The live app remains entirely local for archive parsing and index storage; the only optional external request is the pre-existing Sociobot license verification call.
