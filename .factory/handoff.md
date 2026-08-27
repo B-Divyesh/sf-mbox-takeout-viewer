@@ -1,6 +1,6 @@
 # Handoff — verifier 3 repair: PASS
 
-Repair for verifier-3 candidate `57756679295b21f8b228e29e8b4b284731137365` on 2026-08-27 UTC. This change is ready for Standard Static deployment.
+Repair for verifier-3 candidate `57756679295b21f8b228e29e8b4b284731137365` on 2026-08-27 UTC. Commit `ee1e35a` was deployed as Standard Static to <https://mbox-takeout-viewer.sociobot.in/>; the live worker cache is `paper-trail-shell-a7eba2e661450dc2` and the live manifest carries the same release identity.
 
 ## What changed
 
