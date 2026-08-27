@@ -4,8 +4,13 @@ export const PREFIX_LIMIT = 65_536;
 // 192 KiB preserves useful body-search coverage beyond the preview while
 // preventing a single giant HTML/base64 message from monopolising indexing.
 export const WHOLE_MESSAGE_SEARCH_LIMIT = 192 * 1024;
-type TokenHashes = Map<number, number | number[]>;
 const DISTINCT_TOKEN_LIMIT = 4096;
+// A small fixed hash table is deliberately quicker than Map here. A common
+// newsletter can contain millions of repeated words; checking a typed-array
+// slot keeps that work in the CPU cache and avoids allocating Map entries or
+// collision arrays in the worker's hottest path.
+const SEEN_TOKEN_SLOTS = 8192;
+const SEEN_TOKEN_MASK = SEEN_TOKEN_SLOTS - 1;
 const WORD_BYTES = new Uint8Array(256);
 const LOWER_BYTES = new Uint8Array(256);
 for (let byte = 0; byte < 256; byte++) {
@@ -33,123 +38,62 @@ export class MboxStreamIndexer {
   // Repeated words do not change a Bloom filter. Remember a bounded set of
   // exact hash pairs so newsletters and long quoted threads do not redo the
   // same four modulo/bit operations millions of times.
-  private seenTokens: TokenHashes = new Map();
+  private readonly seenFirst = new Uint32Array(SEEN_TOKEN_SLOTS);
+  private readonly seenSecond = new Uint32Array(SEEN_TOKEN_SLOTS);
+  private readonly seenUsed = new Uint8Array(SEEN_TOKEN_SLOTS);
+  private seenCount = 0;
   private wordScanFinished = false;
-  // State after a newline: 1 expects F, then r/o/m/space complete a boundary.
-  private fromState = 0;
+  // Keep just enough uncommitted input to recognise an envelope split across
+  // two File slices. Everything before it can be searched with native
+  // Uint8Array#indexOf rather than a JavaScript branch for every archive byte.
+  private pending = new Uint8Array(0);
 
   constructor(private readonly archiveId: string) {}
 
   write(chunk: Uint8Array): MessageRecord[] {
     const records: MessageRecord[] = [];
-    // Keep the byte loop in local variables. Chromium does not consistently
-    // inline private method/property accesses in a short-lived Worker, and at
-    // Takeout scale that otherwise becomes billions of needless lookups.
-    let prefixLength = this.prefixLength;
-    let currentStart = this.currentStart;
-    let absolute = this.absolute;
-    let bloom = this.bloom;
-    let tokenLength = this.tokenLength;
-    let tokenOverflow = this.tokenOverflow;
-    let tokenFirst = this.tokenFirst;
-    let tokenSecond = this.tokenSecond;
-    let seenTokens = this.seenTokens;
-    let wordScanFinished = this.wordScanFinished;
-    let fromState = this.fromState;
-    const wasSeen = () => {
-      const known = seenTokens.get(tokenFirst);
-      return typeof known === 'number' ? known === tokenSecond : Boolean(known?.includes(tokenSecond));
-    };
-    const remember = () => {
-      if (seenTokens.size >= DISTINCT_TOKEN_LIMIT) return;
-      const known = seenTokens.get(tokenFirst);
-      if (known === undefined) seenTokens.set(tokenFirst, tokenSecond);
-      else if (typeof known === 'number') seenTokens.set(tokenFirst, [known, tokenSecond]);
-      else known.push(tokenSecond);
-    };
-    const flushToken = () => {
-      if (!tokenOverflow && tokenLength > 1 && !wasSeen()) {
-        bloomAddHashPair(bloom, tokenFirst, tokenSecond || 1);
-        remember();
-      }
-      tokenLength = 0; tokenOverflow = false; tokenFirst = 2166136261; tokenSecond = 5381;
-    };
-
-    for (let i = 0; i < chunk.length; i++) {
-      const byte = chunk[i];
-      if (prefixLength < PREFIX_LIMIT) this.prefix[prefixLength++] = byte;
-
-      if (absolute - currentStart < WHOLE_MESSAGE_SEARCH_LIMIT) {
-        if (!WORD_BYTES[byte]) flushToken();
-        else if (tokenLength >= 80) tokenOverflow = true;
-        else {
-          const code = LOWER_BYTES[byte];
-          tokenFirst = Math.imul(tokenFirst ^ code, 16777619) >>> 0;
-          tokenSecond = (Math.imul(tokenSecond, 33) ^ code) >>> 0;
-          tokenLength++;
-        }
-      } else if (!wordScanFinished) {
-        flushToken();
-        wordScanFinished = true;
-      }
-
-      let boundary = false;
-      if (fromState === 0) fromState = byte === 10 ? 1 : 0;
-      else {
-        const expected = fromState === 1 ? 70
-          : fromState === 2 ? 114
-            : fromState === 3 ? 111
-              : fromState === 4 ? 109 : 32;
-        if (byte === expected) {
-          fromState++;
-          if (fromState === 6) { fromState = 0; boundary = true; }
-        } else fromState = byte === 10 ? 1 : 0;
-      }
-
-      if (boundary) {
-        // We just consumed "\nFrom ". The newline belongs to the old record;
-        // the envelope belongs to the next one.
-        const nextStart = absolute - 4;
-        if (nextStart > currentStart) {
-          if (prefixLength < PREFIX_LIMIT) prefixLength = Math.max(0, prefixLength - 5);
-          this.prefixLength = prefixLength;
-          this.bloom = bloom;
-          this.tokenLength = tokenLength;
-          this.tokenOverflow = tokenOverflow;
-          this.tokenFirst = tokenFirst;
-          this.tokenSecond = tokenSecond;
-          const record = this.finish(nextStart - 1);
-          if (record) records.push(record);
-          currentStart = nextStart;
-          this.prefix[0] = 70; this.prefix[1] = 114; this.prefix[2] = 111; this.prefix[3] = 109; this.prefix[4] = 32;
-          prefixLength = 5;
-          tokenLength = 0; tokenOverflow = false; tokenFirst = 2166136261; tokenSecond = 5381;
-          bloom = new Uint8Array(BLOOM_BYTES);
-          seenTokens = new Map();
-          wordScanFinished = false;
-        }
-      }
-      absolute++;
+    // Only a five-byte lookahead is needed after a newline to distinguish a
+    // real MBOX envelope. Combining it with the next 4 MiB file slice costs a
+    // bounded copy, while replacing a JS byte-by-byte scan over the other
+    // ~99% of a large message with native indexOf.
+    const source = this.pending.length
+      ? joinChunks(this.pending, chunk)
+      : chunk;
+    const safeLength = Math.max(0, source.length - 5);
+    let cursor = 0;
+    let searchFrom = 0;
+    let newline = source.indexOf(10, searchFrom);
+    while (newline >= 0 && newline < safeLength) {
+      if (source[newline + 1] === 70 && source[newline + 2] === 114 && source[newline + 3] === 111 && source[newline + 4] === 109 && source[newline + 5] === 32) {
+        // The newline belongs to the old record; the envelope begins the new
+        // one. End offsets remain exclusive, so seeking still returns exactly
+        // the original EML bytes.
+        this.append(source, cursor, newline + 1);
+        const record = this.finish(this.absolute + newline);
+        if (record) records.push(record);
+        this.resetMessage(this.absolute + newline + 1);
+        this.append(source, newline + 1, newline + 6);
+        cursor = newline + 6;
+        searchFrom = cursor;
+      } else searchFrom = newline + 1;
+      newline = source.indexOf(10, searchFrom);
     }
-    this.prefixLength = prefixLength;
-    this.currentStart = currentStart;
-    this.absolute = absolute;
-    this.bloom = bloom;
-    this.tokenLength = tokenLength;
-    this.tokenOverflow = tokenOverflow;
-    this.tokenFirst = tokenFirst;
-    this.tokenSecond = tokenSecond;
-    this.seenTokens = seenTokens;
-    this.wordScanFinished = wordScanFinished;
-    this.fromState = fromState;
+    this.append(source, cursor, safeLength);
+    this.absolute += safeLength;
+    this.pending = source.slice(safeLength);
     return records;
   }
 
   finishStream(): MessageRecord | undefined {
+    if (this.pending.length) {
+      this.append(this.pending, 0, this.pending.length);
+      this.absolute += this.pending.length;
+      this.pending = new Uint8Array(0);
+    }
     return this.finish(this.absolute);
   }
 
-  get bytesRead(): number { return this.absolute; }
+  get bytesRead(): number { return this.absolute + this.pending.length; }
   get messageCount(): number { return this.id; }
 
   private finish(end: number): MessageRecord | undefined {
@@ -167,6 +111,80 @@ export class MboxStreamIndexer {
     });
   }
 
+  private append(source: Uint8Array, start: number, end: number): void {
+    if (end <= start) return;
+    const prefixBytes = Math.min(end - start, PREFIX_LIMIT - this.prefixLength);
+    if (prefixBytes) {
+      this.prefix.set(source.subarray(start, start + prefixBytes), this.prefixLength);
+      this.prefixLength += prefixBytes;
+    }
+    if (this.wordScanFinished) return;
+    const remaining = WHOLE_MESSAGE_SEARCH_LIMIT - (this.absolute + start - this.currentStart);
+    const scanEnd = remaining > 0 ? Math.min(end, start + remaining) : start;
+    this.scanTokens(source, start, scanEnd);
+    if (scanEnd < end || remaining <= 0) {
+      this.flushToken();
+      this.wordScanFinished = true;
+    }
+  }
+
+  private scanTokens(source: Uint8Array, start: number, end: number): void {
+    let tokenLength = this.tokenLength;
+    let tokenOverflow = this.tokenOverflow;
+    let tokenFirst = this.tokenFirst;
+    let tokenSecond = this.tokenSecond;
+    const seenFirst = this.seenFirst;
+    const seenSecond = this.seenSecond;
+    const seenUsed = this.seenUsed;
+    let seenCount = this.seenCount;
+    const flush = () => {
+      if (!tokenOverflow && tokenLength > 1) {
+        let isNew = true;
+        if (seenCount < DISTINCT_TOKEN_LIMIT) {
+          let slot = (tokenFirst ^ tokenSecond) & SEEN_TOKEN_MASK;
+          while (seenUsed[slot]) {
+            if (seenFirst[slot] === tokenFirst && seenSecond[slot] === tokenSecond) { isNew = false; break; }
+            slot = (slot + 1) & SEEN_TOKEN_MASK;
+          }
+          if (isNew) {
+            seenUsed[slot] = 1;
+            seenFirst[slot] = tokenFirst;
+            seenSecond[slot] = tokenSecond;
+            seenCount++;
+          }
+        }
+        if (isNew) bloomAddHashPair(this.bloom, tokenFirst, tokenSecond || 1);
+      }
+      tokenLength = 0; tokenOverflow = false; tokenFirst = 2166136261; tokenSecond = 5381;
+    };
+    for (let i = start; i < end; i++) {
+      const byte = source[i];
+      if (!WORD_BYTES[byte]) flush();
+      else if (tokenLength >= 80) tokenOverflow = true;
+      else {
+        const code = LOWER_BYTES[byte];
+        tokenFirst = Math.imul(tokenFirst ^ code, 16777619) >>> 0;
+        tokenSecond = (Math.imul(tokenSecond, 33) ^ code) >>> 0;
+        tokenLength++;
+      }
+    }
+    this.tokenLength = tokenLength;
+    this.tokenOverflow = tokenOverflow;
+    this.tokenFirst = tokenFirst;
+    this.tokenSecond = tokenSecond;
+    this.seenCount = seenCount;
+  }
+
+  private resetMessage(start: number): void {
+    this.currentStart = start;
+    this.prefixLength = 0;
+    this.bloom = new Uint8Array(BLOOM_BYTES);
+    this.seenUsed.fill(0);
+    this.seenCount = 0;
+    this.wordScanFinished = false;
+    this.resetToken();
+  }
+
   private flushToken(): void {
     if (!this.tokenOverflow && this.tokenLength > 1) {
       bloomAddHashPair(this.bloom, this.tokenFirst, this.tokenSecond || 1);
@@ -180,4 +198,11 @@ export class MboxStreamIndexer {
     this.tokenFirst = 2166136261;
     this.tokenSecond = 5381;
   }
+}
+
+function joinChunks(first: Uint8Array, second: Uint8Array): Uint8Array {
+  const joined = new Uint8Array(first.length + second.length);
+  joined.set(first);
+  joined.set(second, first.length);
+  return joined;
 }

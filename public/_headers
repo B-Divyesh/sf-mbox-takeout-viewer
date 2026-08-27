@@ -1,5 +1,11 @@
 # Vite content-addresses JS and CSS emitted under /assets. They can be reused
 # forever; a changed file has a new URL. Keep shell documents revalidatable.
+/*
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://api.sociobot.in; worker-src 'self' blob:; manifest-src 'self'; frame-src 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests
+  Permissions-Policy: accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), picture-in-picture=(), usb=()
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
 /assets/*.js
   Cache-Control: public, max-age=31536000, immutable
 /assets/*.css

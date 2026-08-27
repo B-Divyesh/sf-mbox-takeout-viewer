@@ -58,6 +58,14 @@ test('sustains the 20 GiB indexing target on a deterministic 128 MiB MBOX', asyn
   await page.locator('#fileInput').setInputFiles(fixturePath);
   await expect(page.locator('.archive-meta')).toContainText(`${recordCount} messages`);
   const mibPerSecond = recordCount / ((performance.now() - started) / 1000);
+  const evidence = {
+    fixtureMiB: recordCount,
+    measuredMiBPerSecond: Number(mibPerSecond.toFixed(2)),
+    briefMinimumMiBPerSecond: 34.13,
+    regressionGuardMiBPerSecond: 35,
+  };
+  await testInfo.attach('cold-file-throughput.json', { body: JSON.stringify(evidence, null, 2), contentType: 'application/json' });
+  console.log(`cold-file throughput: ${evidence.measuredMiBPerSecond} MiB/s (guard > ${evidence.regressionGuardMiBPerSecond} MiB/s)`);
 
   // The brief is 20 GiB in <10 minutes = 34.14 MiB/s. This deterministic
   // 128 MiB browser fixture exercises the worker, IndexedDB queue, and UI.
