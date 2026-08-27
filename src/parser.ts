@@ -98,6 +98,16 @@ export const BLOOM_BYTES = 1024;
 
 export function bloomAdd(bloom: Uint8Array, token: string): void {
   const [a, b] = bloomHashes(token);
+  bloomAddHashPair(bloom, a, b);
+}
+
+/**
+ * Adds a precomputed pair of ASCII token hashes to a Bloom filter.
+ *
+ * The streaming reader computes these hashes while it scans bytes so it never
+ * needs to allocate one JavaScript string for every word in a multi-GB file.
+ */
+export function bloomAddHashPair(bloom: Uint8Array, a: number, b: number): void {
   for (let i = 0; i < 4; i++) {
     const bit = (a + i * b + i * i) % (bloom.length * 8);
     bloom[bit >>> 3] |= 1 << (bit & 7);

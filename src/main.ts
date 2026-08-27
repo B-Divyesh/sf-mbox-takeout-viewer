@@ -38,7 +38,7 @@ const state: AppState = {
 let worker: Worker | undefined;
 let saveQueue = Promise.resolve();
 let persistenceFailed = false;
-let focusReturn: HTMLElement | null = null;
+let focusReturnId: number | undefined;
 let activeObjectUrls: string[] = [];
 
 void init();
@@ -144,7 +144,7 @@ function renderWorkspace(): void {
       <p class="pro-note">Free: view, search, attachments, and exports up to 1,000 messages. <button class="ghost" data-action="license">${state.pro ? 'Bulk export unlocked ★' : 'Unlock unlimited bulk export'}</button></p>
     </aside>
     <section class="message-desk" aria-label="Messages"><div class="list-toolbar"><label class="check-all"><input id="selectPage" type="checkbox" ${shown.length && shown.every((record) => state.selected.has(record.id)) ? 'checked' : ''} /> Select this page</label><span>Page ${state.page + 1} of ${pages}</span></div>
-      ${rows ? `<ul class="message-list">${rows}</ul>` : `<div class="empty-state"><div><div class="big-mark" aria-hidden="true">∅</div><h2>No matching mail</h2><p>Try fewer words, clear a date, or check the spelling. Search matches headers and the first readable portion of each message.</p><button data-action="clear-filters">Clear filters</button></div></div>`}
+      ${rows ? `<ul class="message-list">${rows}</ul>` : `<div class="empty-state"><div><div class="big-mark" aria-hidden="true">∅</div><h2>No matching mail</h2><p>Try fewer words, clear a date, or check the spelling. Search matches headers and the first 192 KB of each message.</p><button data-action="clear-filters">Clear filters</button></div></div>`}
       ${pages > 1 ? `<nav class="pager" aria-label="Result pages"><button data-page="${state.page - 1}" ${state.page === 0 ? 'disabled' : ''}>Previous</button><span>${(state.page * PAGE_SIZE + 1).toLocaleString()}–${Math.min((state.page + 1) * PAGE_SIZE, filtered.length).toLocaleString()}</span><button data-page="${state.page + 1}" ${state.page >= pages - 1 ? 'disabled' : ''}>Next</button></nav>` : ''}
     </section></div></section>`);
 }
@@ -179,7 +179,7 @@ function bindGlobalEvents(): void {
     else if (action === 'import-index') void importIndex();
     else if (action === 'cancel-index') { worker?.postMessage({ type: 'cancel' }); }
     else if (action === 'clear-filters') { clearFilters(); render(); }
-    else if (action === 'back') { state.view = 'workspace'; state.parsed = undefined; render(); queueMicrotask(() => focusReturn?.focus()); }
+    else if (action === 'back') { returnToResults(); }
     else if (action === 'reconnect') void reconnectArchive();
     else if (action === 'export-eml') void exportSelected();
     else if (action === 'export-index') exportIndex();
@@ -194,7 +194,7 @@ function bindViewEvents(): void {
   const input = document.querySelector<HTMLInputElement>('#fileInput');
   input?.addEventListener('change', () => { const file = input.files?.[0]; if (file) void acceptFile(file); });
   document.querySelectorAll<HTMLElement>('[data-open-archive]').forEach((button) => button.addEventListener('click', () => void openSavedArchive(button.dataset.openArchive!)));
-  document.querySelectorAll<HTMLElement>('[data-open-message]').forEach((button) => button.addEventListener('click', () => void openMessage(Number(button.dataset.openMessage), button)));
+  document.querySelectorAll<HTMLElement>('[data-open-message]').forEach((button) => button.addEventListener('click', () => void openMessage(Number(button.dataset.openMessage))));
   document.querySelectorAll<HTMLInputElement>('[data-select]').forEach((box) => box.addEventListener('change', () => { const id = Number(box.dataset.select); box.checked ? state.selected.add(id) : state.selected.delete(id); render(); }));
   document.querySelectorAll<HTMLButtonElement>('[data-page]').forEach((button) => button.addEventListener('click', () => { state.page = Number(button.dataset.page); render(); document.querySelector('.message-desk')?.scrollIntoView(); }));
   document.querySelector<HTMLInputElement>('#selectPage')?.addEventListener('change', (event) => {
@@ -331,18 +331,33 @@ async function reconnectArchive(): Promise<void> {
   await chooseFile();
 }
 
-async function openMessage(id: number, source: HTMLElement): Promise<void> {
+async function openMessage(id: number): Promise<void> {
   const record = state.records.find((item) => item.id === id);
   if (!record) return;
-  focusReturn = source;
+  // Rendering replaces the row, so retain its stable record ID rather than a
+  // detached DOM node. This restores keyboard users to the exact result.
+  focusReturnId = id;
   state.current = record; state.parsed = undefined; state.view = 'reader'; render();
   try {
     const raw = await readRaw(record);
     state.parsed = parseMessage(raw);
     render();
   } catch (error) {
-    state.view = 'workspace'; render(); toast(error instanceof Error ? error.message : 'Could not open this message.', 'error');
+    state.view = 'workspace'; render(); restoreMessageFocus(); toast(error instanceof Error ? error.message : 'Could not open this message.', 'error');
   }
+}
+
+function returnToResults(): void {
+  state.view = 'workspace';
+  state.parsed = undefined;
+  render();
+  restoreMessageFocus();
+}
+
+function restoreMessageFocus(): void {
+  const id = focusReturnId;
+  if (id === undefined) return;
+  queueMicrotask(() => document.querySelector<HTMLButtonElement>(`[data-open-message="${id}"]`)?.focus());
 }
 
 async function readRaw(record: MessageRecord): Promise<Uint8Array> {

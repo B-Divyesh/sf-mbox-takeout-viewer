@@ -14,7 +14,7 @@ Live product: <https://mbox-takeout-viewer.sociobot.in>
 - CSV index export, responsive keyboard UI, and offline app shell
 - Free exports up to 1,000 messages; a Sociobot one-time license unlocks larger ZIPs
 
-Uncompressed `.mbox` files support direct byte seeking. Gzip streams cannot be randomly accessed by browser APIs, so opening a result in `.mbox.gz` re-decompresses from the beginning up to that message. For repeated work on very large exports, extract the `.mbox` first. A compact Bloom index covers words throughout each raw message while a 64 KB parse window supplies headers and previews; exact phrase matching is limited to the retained preview.
+Uncompressed `.mbox` files support direct byte seeking. Gzip streams cannot be randomly accessed by browser APIs, so opening a result in `.mbox.gz` re-decompresses from the beginning up to that message. For repeated work on very large exports, extract the `.mbox` first. A compact Bloom index covers headers and the first 192 KB of every message (beyond the 64 KB preview) so huge attachments and long quoted threads cannot slow archive indexing; exact phrase matching is limited to the retained preview.
 
 ## Run locally
 

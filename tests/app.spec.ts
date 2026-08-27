@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { writeFile } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
 
 test('indexes, searches, reads, and exports the local sample', async ({ page }, testInfo) => {
@@ -20,6 +21,7 @@ test('indexes, searches, reads, and exports the local sample', async ({ page }, 
   await expect(page.getByText(/tiny local sample/)).toBeVisible();
 
   await page.getByRole('button', { name: /Back to results/ }).click();
+  await expect(page.getByRole('button', { name: /Your first recovered message/ })).toBeFocused();
   await page.getByLabel(/Select Your first recovered message/).check();
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: /Export selected/ }).click();
@@ -34,6 +36,32 @@ test('indexes, searches, reads, and exports the local sample', async ({ page }, 
   if (testInfo.project.name === 'mobile') {
     await expect(page.locator('.message-sheet')).toHaveCSS('background-color', /rgb/);
   }
+});
+
+test('sustains the 20 GiB indexing target on a deterministic 128 MiB MBOX', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'The verifier profile is desktop Chromium.');
+  test.setTimeout(120_000);
+  const mib = 1024 * 1024;
+  const recordCount = 128;
+  const header = 'From benchmark@example.test Thu Jan 01 00:00:00 2026\r\nSubject: Throughput record\r\nFrom: Benchmark <benchmark@example.test>\r\n\r\n';
+  const words = Buffer.from('local archive search token ');
+  const record = Buffer.alloc(mib, 0x20);
+  record.write(header);
+  for (let cursor = Buffer.byteLength(header); cursor < record.length - words.length; cursor += words.length) words.copy(record, cursor);
+  record[record.length - 1] = 10;
+  const fixture = Buffer.concat(Array.from({ length: recordCount }, () => record));
+  const fixturePath = testInfo.outputPath('20-gib-target-fixture.mbox');
+  await writeFile(fixturePath, fixture);
+
+  await page.goto('/');
+  const started = performance.now();
+  await page.locator('#fileInput').setInputFiles(fixturePath);
+  await expect(page.locator('.archive-meta')).toContainText(`${recordCount} messages`);
+  const mibPerSecond = recordCount / ((performance.now() - started) / 1000);
+
+  // The brief is 20 GiB in <10 minutes = 34.14 MiB/s. This deterministic
+  // 128 MiB browser fixture exercises the worker, IndexedDB queue, and UI.
+  expect(mibPerSecond).toBeGreaterThan(35);
 });
 
 test('reloads its shell offline after service worker installation', async ({ page, context }) => {

@@ -1,4 +1,4 @@
-const CACHE = 'paper-trail-shell-v2';
+const CACHE = 'paper-trail-shell-v3';
 const CORE = ['/', '/index.html', '/manifest.webmanifest', '/offline.html', '/icon.svg', '/assets/hero-archive.webp', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
