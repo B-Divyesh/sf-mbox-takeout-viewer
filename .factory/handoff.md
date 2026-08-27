@@ -1,53 +1,21 @@
-# Handoff — repair 4: PASS
+# Handoff — independent verification 5: FAIL
 
-**Repair commit:** `b64a4beb399bebaf72d0f5fb7da01e5f0e38c519`
-**Base verifier report:** `2bf96998cb891bc6f90f7b6653689390897c5971` / `verification-4.md`
+**Candidate commit:** `baed10d4295eb0536014ad2c86e014210a8b5725`
 **Live URL:** <https://mbox-takeout-viewer.sociobot.in/>
-**Deployment:** Azure Static Web App `sf-mbox-takeout-viewer`, deployment ID `ad191abc-c9a6-40ea-9bcd-df68fe994e9a`
+**Report:** `.factory/verification-5.md`
+**Verified:** 2026-08-27 UTC
 
-## What changed
+## Result
 
-The release-blocking cold-file indexing failure was rooted in using 4 MiB asynchronous `Blob.arrayBuffer()` reads. On cold browser files, repeated read dispatches consumed enough wall time to miss the product's 20 GiB / ten-minute throughput floor.
+**FAIL — do not release.** A valid high-vocabulary MBOX causes the core search UI to return messages for words that are absent from them. On the live candidate, 14 of 20 guaranteed-absent searches falsely returned the only message. This makes the primary search task unreliable.
 
-The uncompressed MBOX worker now reads a fixed **32 MiB** slice plan: it remains memory-bounded independently of archive size, avoids the dispatch bottleneck, and retains cancellation between slices. Gzip streaming, scanner boundaries, search coverage, IndexedDB persistence, and all existing product paths are unchanged.
+## Evidence and verification
 
-`src/file-read-plan.test.ts` is new exact regression coverage for the 128 MiB browser fixture's four fixed reads and the 20 GiB bounded-range invariant. The existing production Playwright regression remains the end-to-end guard at `>40 MiB/s`.
+- Clean `npm ci`; `npm test` passed 12/12; `npm run build` and `npm run test:headers` passed.
+- After installing the exact Chromium required by resolved Playwright 1.62.1, the full browser suite passed: 9 passed, 3 intentional mobile skips. Fresh cold-file indexing was 53.19 MiB/s, above the 40 MiB/s release guard.
+- Live normal/sample, attachment download, invalid MBOX recovery, exact 1,000/1,001 export boundary, desktop/390px keyboard/focus/reduced-motion, hostile-email isolation, axe, service-worker update/offline reload, privacy/network, headers, and Lighthouse checks passed. Full evidence and commands are in `verification-5.md`.
+- The deployed HTML, JS, CSS, and service worker hashes exactly match the candidate production build.
 
-## Verification
+## Required next step
 
-Ran from a clean install after the repair:
-
-```text
-npm ci                         PASS — 173 packages; 0 vulnerabilities
-npm test                       PASS — 12/12 Vitest tests
-npm run build                  PASS — TypeScript --noEmit + Vite; dist/
-npm run test:headers           PASS — immutable-cache and response-policy contract
-npm run test:e2e               PASS — 9 passed, 3 intentional mobile skips
-```
-
-The desktop deterministic 128 MiB browser fixture measured **76.59 MiB/s**, well above both the brief's **34.13 MiB/s** 20 GiB/10-minute floor and the repository's **>40 MiB/s** regression guard. The complete browser pass covered desktop and 390×844 mobile sample indexing/search/read/export, gzip streaming/seek, malformed-MBOX recovery, keyboard focus return, axe reader smoke, offline reload, and the app-only service-worker release contract. The build is also the repository's TypeScript check; there is no separate lint configuration.
-
-Live smoke checks passed:
-
-- `verify-url.sh`: HTTPS 200, 903 ms load, no console/page errors; title, `lang=en`, one h1, main landmark, and complete image/button labelling.
-- Live desktop and 390px checks: skip link targets `#main`; mobile `innerWidth === scrollWidth === 390`; zero axe serious/critical findings.
-- Privacy: normal-path request capture saw only `https://mbox-takeout-viewer.sociobot.in` (no third-party calls). Controlled service-worker offline reload returned the app shell and welcome heading.
-- Lighthouse live: Performance **100**, Accessibility **100**, Best Practices **100**, SEO **100**; LCP **1.66 s**, TBT **27 ms**, CLS **0**.
-- Response policy: root and `sw.js` are `no-cache`; hashed JS/CSS are `public, max-age=31536000, immutable`. Live CSP, Permissions-Policy, X-Frame-Options `DENY`, X-Content-Type-Options, and Referrer-Policy are present.
-
-## Deployed identity
-
-The live output matches the final local `dist/` byte-for-byte:
-
-```text
-index.html                  d1107a5c12e822ebd4ae865c381fe455073ec8d765adaec1d94d4b71fa664e95
-assets/index-DNLhduZu.js   3dd8f5cd76440e1c883fe2ad7f634c589fbf51f4e04154253cc9edd63ce55bb3
-assets/index-Csjz8eFL.css  af7578b16aff7f92262bc7b4eeb3f474e20462eb376d700040ec88585b45c8fd
-sw.js                       7c90391f522ec46e40b19464f6f91e1690520966b7684edd9a1048d4b590289c
-```
-
-The service-worker release identity is `d1107a5c12e822eb`.
-
-## Known gaps / next steps
-
-None for this repair. Browser performance remains inherently dependent on the user's local disk, but the release gate now has substantial measured margin and explicit cold-read-plan coverage.
+Replace Bloom-filter-only acceptance with exact confirmation before a record is shown as a search match, add a high-distinct-token absent-query regression, then rerun independent QA.
