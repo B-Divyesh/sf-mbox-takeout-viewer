@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { MboxStreamIndexer } from './mbox-scanner';
+import { hasMboxEnvelopeStart, MboxStreamIndexer } from './mbox-scanner';
 import type { MessageRecord } from './parser';
 
 const ctx: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
@@ -20,6 +20,8 @@ async function indexFile(file: File, archiveId: string, gzip: boolean): Promise<
   const indexer = new MboxStreamIndexer(archiveId);
   let batch: MessageRecord[] = [];
   let lastProgress = 0;
+  let envelopeChecked = false;
+  let envelopePrefix: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   const addRecords = (records: MessageRecord[]) => {
     batch.push(...records);
     if (batch.length >= 200) {
@@ -28,7 +30,20 @@ async function indexFile(file: File, archiveId: string, gzip: boolean): Promise<
     }
   };
 
-  const consume = (value: Uint8Array) => {
+  const consume = (chunk: Uint8Array) => {
+    // A `.mbox` suffix alone is not meaningful. Delay the first scan until we
+    // have enough bytes to validate the MBOX envelope, including streams that
+    // happen to split those five bytes across reads.
+    let value: Uint8Array<ArrayBufferLike> = chunk;
+    if (!envelopeChecked) {
+      value = envelopePrefix.length ? join(envelopePrefix, chunk) : chunk;
+      if (value.length < 5) { envelopePrefix = value; return; }
+      if (!hasMboxEnvelopeStart(value)) {
+        throw new Error("This is not an MBOX archive: it must start with a 'From ' envelope line. Export Gmail Takeout as MBOX, or unzip the download and choose the .mbox file.");
+      }
+      envelopeChecked = true;
+      envelopePrefix = new Uint8Array(0);
+    }
     compressedRead += gzip ? value.byteLength : 0;
     addRecords(indexer.write(value));
     const now = performance.now();
@@ -55,8 +70,18 @@ async function indexFile(file: File, archiveId: string, gzip: boolean): Promise<
       consume(new Uint8Array(await file.slice(offset, Math.min(file.size, offset + READ_CHUNK_BYTES)).arrayBuffer()));
     }
   }
+  if (!envelopeChecked) {
+    throw new Error("This MBOX file is empty or incomplete. Choose the original Gmail Takeout .mbox file and try again.");
+  }
   const final = indexer.finishStream();
   if (final) batch.push(final);
   if (batch.length) ctx.postMessage({ type: 'batch', records: batch });
   ctx.postMessage({ type: 'done', count: indexer.messageCount, bytes: indexer.bytesRead });
+}
+
+function join(first: Uint8Array<ArrayBufferLike>, second: Uint8Array<ArrayBufferLike>): Uint8Array<ArrayBufferLike> {
+  const joined = new Uint8Array(first.length + second.length);
+  joined.set(first);
+  joined.set(second, first.length);
+  return joined;
 }

@@ -1,11 +1,17 @@
 import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
 import { bloomHas } from './parser';
-import { MboxStreamIndexer, WHOLE_MESSAGE_SEARCH_LIMIT } from './mbox-scanner';
+import { hasMboxEnvelopeStart, MboxStreamIndexer, WHOLE_MESSAGE_SEARCH_LIMIT } from './mbox-scanner';
 
 const encoder = new TextEncoder();
 
 describe('bounded MBOX scanner', () => {
+  it('accepts only a real MBOX envelope at the start of an archive', () => {
+    expect(hasMboxEnvelopeStart(encoder.encode('From sender@example.test Thu Jan 01 00:00:00 2026\n'))).toBe(true);
+    expect(hasMboxEnvelopeStart(encoder.encode('this is not an mbox format at all'))).toBe(false);
+    expect(hasMboxEnvelopeStart(encoder.encode('From'))).toBe(false);
+  });
+
   it('keeps offsets, whole-message search, and split envelope detection intact', () => {
     const source = encoder.encode('From first@example.test Thu Jan 01 00:00:00 2026\r\nSubject: First\r\n\r\nalpha needleword\r\nFrom second@example.test Fri Jan 02 00:00:00 2026\r\nSubject: Second\r\n\r\nbeta\r\n');
     const scanner = new MboxStreamIndexer('test');

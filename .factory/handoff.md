@@ -1,28 +1,41 @@
-# Handoff — verification 3: FAIL
+# Handoff — verifier 3 repair: PASS
 
-Candidate `57756679295b21f8b228e29e8b4b284731137365` was independently verified from a clean checkout and against <https://mbox-takeout-viewer.sociobot.in/> on 2026-08-27 UTC. **FAIL — do not promote this candidate.** The live HTML, hashed assets, and service worker exactly match this candidate, so this is not a deployment-only discrepancy.
+Repair for verifier-3 candidate `57756679295b21f8b228e29e8b4b284731137365` on 2026-08-27 UTC. This change is ready for Standard Static deployment.
 
-## Blocking defects
+## What changed
 
-1. **P1: throughput quality gate fails.** The required desktop browser test for the 20 GiB-equivalent 128 MiB MBOX measured 30.97 MiB/s in the full suite (guard `>35`, brief floor 34.13). Three repeats were 32.00, 31.35, and 35.54 MiB/s: 3/4 miss the brief floor. `npm run test:e2e` therefore failed (5 passed, 1 failed, 2 expected skips).
-2. **P1: PWA app-only releases can remain permanently stale.** `sw.js` has fixed `paper-trail-shell-v3` cache-first shell logic. A controlled live-browser simulation of a changed `index.html` with unchanged `sw.js` made zero network requests and served the old app shell. The update toast works only when the worker itself changes.
-3. **P2: malformed MBOX is falsely accepted.** A 33-byte non-MBOX file named `not-really.mbox` was reported as `1 messages` and `Indexed 1 messages.` rather than producing an actionable validation error.
+- **Reliable multi-GB indexing:** record metadata now normalizes only an 8 KiB display prefix; the existing 192 KiB byte Bloom scan still indexes whole-message search terms. This removes repeated large-string cleanup from the worker’s hot path while retaining bounded memory and search coverage.
+- **Release-safe PWA updates:** `npm run build` derives a deterministic 16-character SHA-256 release identity from the generated app shell. It writes that identity into both the service-worker shell-cache name and the installed-app manifest `id`/`start_url`. Therefore a Vite-only app change changes `/sw.js`, installs a new cache, calls the existing `skipWaiting`/`clients.claim` update path, and surfaces the existing “A new version is ready” notice. Identical builds remain byte-for-byte stable.
+- **Honest malformed-input recovery:** the worker requires the decompressed stream to begin with an MBOX `From ` envelope before indexing. Empty/incomplete files and extension-valid non-MBOX input return a clear recovery message, reset the partial archive state, and leave the user at the chooser.
+- **Regressions:** added exact tests for the deterministic app-only cache version, manifest version, malformed MBOX rejection/recovery, and a 128 MiB desktop browser performance gate now set to **>40 MiB/s** (17% above the 34.13 MiB/s product floor).
 
-Full evidence, passing workflow/security/accessibility/mobile/offline checks, headers, bundle sizes, and required remediation are in [.factory/verification-3.md](verification-3.md).
+## Verification
 
-## Commands run
+From a clean dependency installation (`npm ci`):
 
 ```bash
-git clean -xfd
-npm ci
 npm run build
 npm run test:headers
 npm test
 npm run test:e2e
 ```
 
-Build, header test, and 8/8 unit tests passed. No separate lint script is defined; the production build includes `tsc --noEmit`.
+All passed: build/typecheck, Standard Static headers, 10/10 unit tests, and 9 passed / 3 intentional mobile skips in Playwright. The browser suite covers local sample indexing/search/reader/export, gzip streaming/seek, offline controlled reload, the generated update contract, malformed `.mbox` recovery, axe serious/critical issues, and mobile layout/interactions.
 
-## Next steps
+Cold desktop 128 MiB MBOX runs measured **46.28**, **46.88**, **46.21**, and **46.13 MiB/s**, all above the 40 MiB/s release guard and the 34.13 MiB/s job-to-be-done floor.
 
-Fix the two P1 defects and MBOX validation, deploy the resulting candidate, and rerun the complete verification report. Do not treat the current live deployment as accepted.
+Local production-build Lighthouse (headless Chromium) scored Performance **100**, Accessibility **100**, Best Practices **100**, SEO **100**; LCP was **1.66 s** and CLS **0**. Production assets remain 13.77 KiB gzip JS and 4.00 KiB gzip CSS.
+
+## Run and deploy
+
+```bash
+npm ci
+npm run build
+npm run preview
+```
+
+Deploy `dist/` as the configured **Standard Static** site. The generated `dist/sw.js` and `dist/manifest.webmanifest` are release artifacts and must be deployed with the hashed Vite assets.
+
+## Known gaps
+
+None from verifier-3. The malformed-input validation intentionally enforces standard Gmail Takeout MBOX envelope syntax; users with another mail-export format should re-export as MBOX or convert it before opening.

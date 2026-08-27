@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
+import { appReleaseVersion } from '../scripts/release-sw.mjs';
 
 test('indexes, searches, reads, and exports the local sample', async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
@@ -62,14 +63,35 @@ test('sustains the 20 GiB indexing target on a deterministic 128 MiB MBOX', asyn
     fixtureMiB: recordCount,
     measuredMiBPerSecond: Number(mibPerSecond.toFixed(2)),
     briefMinimumMiBPerSecond: 34.13,
-    regressionGuardMiBPerSecond: 35,
+    regressionGuardMiBPerSecond: 40,
   };
   await testInfo.attach('cold-file-throughput.json', { body: JSON.stringify(evidence, null, 2), contentType: 'application/json' });
   console.log(`cold-file throughput: ${evidence.measuredMiBPerSecond} MiB/s (guard > ${evidence.regressionGuardMiBPerSecond} MiB/s)`);
 
   // The brief is 20 GiB in <10 minutes = 34.14 MiB/s. This deterministic
   // 128 MiB browser fixture exercises the worker, IndexedDB queue, and UI.
-  expect(mibPerSecond).toBeGreaterThan(35);
+  // Keep a 17% buffer above the product floor (34.13 MiB/s) so this remains a
+  // release gate rather than a timing lottery on a cold browser worker.
+  expect(mibPerSecond).toBeGreaterThan(40);
+});
+
+test('builds a deterministic new PWA cache when only app assets change', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'One browser proves the release artifact contract.');
+  const html = await readFile('dist/index.html', 'utf8');
+  const [worker, manifest] = await Promise.all([readFile('dist/sw.js', 'utf8'), readFile('dist/manifest.webmanifest', 'utf8')]);
+  const version = appReleaseVersion(html);
+  const appOnlyHtml = html.replace(/(\/assets\/index-)[^"']+/, '$1app-only-release.js');
+
+  expect(appOnlyHtml).not.toBe(html);
+  expect(appReleaseVersion(appOnlyHtml)).not.toBe(version);
+  expect(worker).toContain(`paper-trail-shell-${version}`);
+  expect(worker).not.toContain('__APP_RELEASE__');
+  expect(manifest).toContain(`/?v=${version}`);
+
+  await page.goto('/');
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  const servedWorker = await page.evaluate(() => fetch('/sw.js', { cache: 'no-store' }).then((response) => response.text()));
+  expect(servedWorker).toContain(`paper-trail-shell-${version}`);
 });
 
 test('reloads its shell offline after service worker installation', async ({ page, context }) => {
@@ -94,4 +116,15 @@ test('streams and seeks a gzip MBOX without uploading', async ({ page }, testInf
   await expect(page.getByRole('heading', { level: 1 })).toContainText('takeout.mbox.gz');
   await page.getByRole('button', { name: /Second gzip message/ }).click();
   await expect(page.getByText(/Found after a streamed seek/)).toBeVisible();
+});
+
+test('rejects malformed extension-valid MBOX input with recovery guidance', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#fileInput').setInputFiles({
+    name: 'not-really.mbox', mimeType: 'application/mbox', buffer: Buffer.from('this is not an mbox format at all'),
+  });
+  await expect(page.getByRole('alert')).toContainText("This is not an MBOX archive: it must start with a 'From ' envelope line.");
+  await expect(page.getByRole('alert')).toContainText('unzip the download and choose the .mbox file');
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Find the one email');
+  await expect(page.locator('.archive-meta')).toHaveCount(0);
 });

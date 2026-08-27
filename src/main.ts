@@ -272,7 +272,7 @@ function startIndexing(file: File, archiveId: string, gzip: boolean): void {
     } else if (data.type === 'cancelled') {
       state.view = 'welcome'; resetArchive(); render(); toast('Indexing cancelled. The original file was not changed.');
     } else if (data.type === 'error') {
-      state.view = 'welcome'; render(); toast(data.message || 'Could not index this archive.', 'error');
+      state.view = 'welcome'; resetArchive(); render(); toast(data.message || 'Could not index this archive.', 'error', 9000);
     }
   };
   currentWorker.onerror = () => { state.view = 'welcome'; render(); toast('The indexing worker stopped unexpectedly. Try extracting the archive and opening the .mbox file.', 'error'); };

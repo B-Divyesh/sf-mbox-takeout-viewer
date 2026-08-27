@@ -36,6 +36,10 @@ export interface ParsedMessage {
 
 const decoder = new TextDecoder('utf-8', { fatal: false });
 const encoder = new TextEncoder();
+// The Bloom filter covers the first 192 KiB of every message. Keeping this
+// display/search prefix compact avoids repeatedly normalising 64 KiB of HTML
+// and quoted mail for every record in a multi-gigabyte archive.
+const INDEX_TEXT_LIMIT = 8192;
 
 export function parseHeaders(input: string): Record<string, string> {
   const unfolded = input.replace(/\r?\n[ \t]+/g, ' ');
@@ -68,7 +72,7 @@ export function indexRecordFromPrefix(prefix: Uint8Array, base: Omit<MessageReco
   if (source.startsWith('From ')) source = source.slice(source.indexOf('\n') + 1);
   const split = source.search(/\r?\n\r?\n/);
   const headerText = split >= 0 ? source.slice(0, split) : source;
-  const body = split >= 0 ? source.slice(split).replace(/^\s+/, '') : '';
+  const body = split >= 0 ? source.slice(split, split + INDEX_TEXT_LIMIT).replace(/^\s+/, '') : '';
   const headers = parseHeaders(headerText);
   const cleanBody = body
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')

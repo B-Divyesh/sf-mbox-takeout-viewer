@@ -1,4 +1,7 @@
-const CACHE = 'paper-trail-shell-v3';
+// `scripts/release-sw.mjs` replaces this marker from the generated app shell.
+// That makes an app-only release install a new worker and cache, while two
+// identical builds retain byte-for-byte reproducibility.
+const CACHE = 'paper-trail-shell-__APP_RELEASE__';
 const CORE = ['/', '/index.html', '/manifest.webmanifest', '/offline.html', '/icon.svg', '/assets/hero-archive.webp', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {

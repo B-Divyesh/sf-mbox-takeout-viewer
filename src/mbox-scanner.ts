@@ -18,6 +18,13 @@ for (let byte = 0; byte < 256; byte++) {
   WORD_BYTES[byte] = Number((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte === 64 || byte === 46 || byte === 95 || byte === 45);
 }
 
+/** MBOXRD/MBOXO records start with a Unix-style `From ` envelope line. */
+export function hasMboxEnvelopeStart(bytes: Uint8Array): boolean {
+  return bytes.length >= 5
+    && bytes[0] === 70 && bytes[1] === 114 && bytes[2] === 111
+    && bytes[3] === 109 && bytes[4] === 32;
+}
+
 /**
  * A bounded, byte-oriented MBOX scanner. It deliberately avoids strings and
  * growing arrays in its byte loop: 20 GiB archives should spend their time on
