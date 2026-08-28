@@ -2,7 +2,7 @@
 // That makes an app-only release install a new worker and cache, while two
 // identical builds retain byte-for-byte reproducibility.
 const CACHE = 'paper-trail-shell-__APP_RELEASE__';
-const CORE = ['/', '/demo', '/index.html', '/manifest.webmanifest', '/offline.html', '/icon.svg', '/assets/hero-archive.webp', '/icons/icon-192.png', '/icons/icon-512.png'];
+const CORE = ['/', '/demo', '/index.html', '/manifest.webmanifest', '/offline.html', '/icon.svg', '/assets/hero-archive.webp', '/assets/social-preview.webp', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {

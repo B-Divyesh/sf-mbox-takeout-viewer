@@ -53,6 +53,7 @@ Transitions last 160–240ms and use only opacity/transform: sheets lift by 3px,
 ## Asset plan and provenance
 
 - `hero-archive.webp`: original AI-generated risograph collage showing a monumental folded mail archive feeding through a small desktop indexer into sorted paper slips. Used only on the pre-import welcome panel, with meaningful alt text. Responsive WebP, explicit dimensions, ≤300KB.
+- `social-preview.webp`: 1200×630 WebP crop derived from `hero-archive.webp` on 2026-08-28 with ImageMagick. Used for Open Graph and Twitter previews; it retains the same original factory-image provenance and contains no text.
 - App icons and all interface glyphs are hand-authored geometric SVG/CSS, not stock assets.
 - Paper grain and halftone use CSS gradients at very low opacity; no external texture requests.
 
