@@ -43,6 +43,8 @@ button:disabled { cursor: not-allowed; opacity: .55; transform: none; box-shadow
 .brand-mark::before, .brand-mark::after { content: ''; position: absolute; left: 6px; right: 6px; height: 2px; background: #fffdf5; }
 .brand-mark::before { top: 11px; box-shadow: 0 6px 0 #fffdf5, 0 12px 0 #fffdf5; }
 .top-actions { display: flex; align-items: center; gap: 8px; }
+.site-nav { display: flex; align-items: center; gap: 12px; font-size: 13px; font-weight: 850; }
+.site-nav a { min-height: 44px; display: inline-flex; align-items: center; }
 .privacy-pill { display: flex; gap: 8px; align-items: center; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
 .privacy-pill::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--green); border: 1px solid var(--rule); }
 .icon-button { width: 44px; padding: 0; box-shadow: none; }
@@ -144,6 +146,9 @@ input[type='checkbox']:checked::before { transform: scale(1); }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 .license-status { border-left: 5px solid var(--blue); padding: 10px 12px; background: color-mix(in srgb, var(--blue) 9%, transparent); }
 .offline-banner { background: var(--mustard); color: #17211d; text-align: center; padding: 8px; font-size: 12px; font-weight: 850; border-bottom: 2px solid var(--rule); }
+.demo-banner { min-height: 48px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px 16px; padding: 6px 16px; background: var(--blue); color: #fffdf5; border-bottom: 2px solid var(--rule); font-size: 13px; font-weight: 850; text-align: center; }
+.demo-banner span { display: inline-flex; gap: 8px; }
+.demo-banner .ghost { color: #fffdf5; min-height: 36px; padding: 5px 8px; text-decoration: underline; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }
 
 @media (prefers-color-scheme: dark) {
@@ -163,8 +168,10 @@ input[type='checkbox']:checked::before { transform: scale(1); }
 }
 @media (max-width: 620px) {
   .site-header { padding-inline: 14px; }
-  .privacy-pill span { display: none; }
-  .top-actions .button { display: none; }
+  .brand { font-size: 19px; gap: 7px; }
+  .brand-mark { width: 31px; height: 31px; }
+  .site-nav { gap: 8px; font-size: 12px; }
+  .site-nav a { min-height: 40px; }
   .welcome, .workspace, .reader { padding-inline: 16px; }
   h1 { font-size: 43px; }
   .hero-actions > * { width: 100%; }
@@ -176,6 +183,7 @@ input[type='checkbox']:checked::before { transform: scale(1); }
   .reader-top { flex-wrap: wrap; }
   .progress-meta { display: grid; }
   .site-footer { display: grid; }
+  .demo-banner { align-items: center; padding-inline: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

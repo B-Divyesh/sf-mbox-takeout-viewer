@@ -1,8 +1,6 @@
 # Paper Trail
 
-Paper Trail is a private, local-first Gmail Takeout MBOX viewer at https://mbox-takeout-viewer.sociobot.in.
+Paper Trail helps people search Gmail Takeout archives in their browser. Open an archive, find messages, and export selected emails.
 
-It streams MBOX files in the browser, builds a local search index, renders MIME messages in a sandbox, downloads attachments, and exports original EML files. Email data is never uploaded. The free tier supports exports of up to 1,000 selected messages; a $19 one-time license unlocks larger exports.
-
-- Privacy: https://mbox-takeout-viewer.sociobot.in/privacy/
-- Terms: https://mbox-takeout-viewer.sociobot.in/terms/
+Demo: https://mbox-takeout-viewer.sociobot.in/demo
+Privacy: https://mbox-takeout-viewer.sociobot.in/privacy/

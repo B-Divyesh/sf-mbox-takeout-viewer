@@ -1,6 +1,6 @@
 import './styles.css';
 import IndexWorker from './indexer.worker?worker';
-import { deleteArchive, getArchives, getMessages, saveArchive, saveMessages, type ArchiveRecord } from './db';
+import { deleteArchive, deleteDemoStorage, getArchives, getMessages, saveArchive, saveMessages, setDemoStorage, type ArchiveRecord } from './db';
 import { bloomHas, formatBytes, parseMessage, safeFilename, SEARCH_SCOPE_BYTES, searchPrefixContainsTerms, type MessageRecord, type ParsedMessage } from './parser';
 import { createZip, type ZipEntry } from './zip';
 
@@ -9,7 +9,7 @@ const PRODUCT = 'mbox-takeout-viewer';
 const API_BASE = 'https://api.sociobot.in/api/v1';
 const PAGE_SIZE = 80;
 
-type AppView = 'welcome' | 'indexing' | 'workspace' | 'reader';
+type AppView = 'welcome' | 'indexing' | 'workspace' | 'reader' | 'not-found';
 interface AppState {
   view: AppView;
   archives: ArchiveRecord[];
@@ -32,12 +32,14 @@ interface AppState {
   verifiedSearchIds: Set<number>;
   searchChecking: boolean;
   searchNeedsReconnect: boolean;
+  demo: boolean;
 }
 
 const state: AppState = {
   view: 'welcome', archives: [], records: [], query: '', sender: '', fromDate: '', toDate: '', online: navigator.onLine,
   hasAttachments: false, sort: 'newest', selected: new Set(), page: 0, pro: readCachedLicense(),
   verifiedSearchIds: new Set(), searchChecking: false, searchNeedsReconnect: false,
+  demo: false,
 };
 let worker: Worker | undefined;
 let saveQueue = Promise.resolve();
@@ -51,9 +53,17 @@ void init();
 async function init(): Promise<void> {
   captureReturnedLicense();
   state.pro = readCachedLicense();
+  const initialUrl = new URL(location.href);
+  state.demo = initialUrl.pathname === '/demo' || initialUrl.pathname.startsWith('/demo/') || initialUrl.searchParams.get('demo') === '1';
+  if (initialUrl.searchParams.get('demo') === '1' && initialUrl.pathname !== '/demo') {
+    history.replaceState({}, '', '/demo');
+  }
+  setDemoStorage(state.demo);
   try { state.archives = await getArchives(); } catch { /* private browsing can disable IDB */ }
-  render();
   bindGlobalEvents();
+  window.addEventListener('popstate', () => { void restoreRoute(); });
+  if (state.demo && !state.archives.length) await openSample();
+  else await restoreRoute(false);
   void verifyLicense();
   registerServiceWorker();
 }
@@ -61,16 +71,18 @@ async function init(): Promise<void> {
 function chrome(content: string): string {
   return `<div class="shell">
     ${state.online ? '' : '<div class="offline-banner" role="status">Offline — local archives and saved indexes still work.</div>'}
+    ${state.demo ? '<div class="demo-banner" role="status">Demo — sample data, nothing is saved <span><button class="ghost" data-action="reset-demo">Reset demo</button><button class="ghost" data-action="start-real">Start for real</button></span></div>' : ''}
     <header class="site-header">
-      <a class="brand" href="#" data-action="home" aria-label="Paper Trail home"><span class="brand-mark" aria-hidden="true"></span>Paper Trail</a>
+      <a class="brand" href="/" data-action="home" aria-label="Paper Trail home"><span class="brand-mark" aria-hidden="true"></span>Paper Trail</a>
       <div class="top-actions">
-        <span class="privacy-pill"><span>Nothing leaves this device</span></span>
+        <nav class="site-nav" aria-label="Primary"><a href="/demo" data-action="demo-link">Demo</a><a href="/privacy/">Privacy</a></nav>
         <button class="icon-button" data-action="license" aria-label="License and unlock" title="License and unlock">${state.pro ? '★' : '◇'}</button>
       </div>
     </header>
     <main id="main">${content}</main>
-    <footer class="site-footer"><span>Private by design. Generated risograph artwork disclosed.</span><nav class="footer-links" aria-label="Legal"><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/B-Divyesh/sf-mbox-takeout-viewer" rel="noreferrer">Source</a></nav></footer>
+    <footer class="site-footer"><span>Search Gmail Takeout archives in your browser.</span><nav class="footer-links" aria-label="Legal"><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/B-Divyesh/sf-mbox-takeout-viewer" rel="noreferrer">Source (GitHub)</a></nav><small>Paper Trail · build 0ae26d0</small></footer>
     <div class="toast-dock" id="toastDock" aria-live="polite" aria-atomic="true"></div>
+    <div class="sr-only" id="route-announcement" aria-live="polite" aria-atomic="true"></div>
     <input class="sr-only" id="fileInput" type="file" aria-label="Choose an MBOX archive" accept=".mbox,.gz,.mbox.gz,application/mbox,application/gzip" tabindex="-1" />
   </div>`;
 }
@@ -80,22 +92,27 @@ function render(): void {
   if (state.view === 'welcome') renderWelcome();
   else if (state.view === 'indexing') renderIndexing();
   else if (state.view === 'workspace') renderWorkspace();
-  else renderReader();
+  else if (state.view === 'reader') renderReader();
+  else renderNotFound();
   bindViewEvents();
 }
 
 function renderWelcome(): void {
   const recent = state.archives.length ? `<section class="how" aria-labelledby="recent-title"><h2 id="recent-title">Recently indexed</h2><ul class="message-list">${state.archives.slice(0, 4).map((archive) => `<li class="message-row"><span aria-hidden="true">▤</span><span class="sender">${esc(archive.name)}</span><button data-open-archive="${esc(archive.id)}" class="subject-button"><span class="subject">Reconnect this archive</span><span class="snippet">${archive.count.toLocaleString()} messages · indexed ${formatDate(archive.indexedAt)}</span></button><span class="date-size">${formatBytes(archive.size)}</span></li>`).join('')}</ul></section>` : '';
   app.innerHTML = chrome(`<section class="welcome" id="dropZone">
-    <div><p class="eyebrow">Your Takeout, finally readable</p><h1>Find the one email in 20&nbsp;GB.</h1>
-      <p class="lede">Open a Gmail Takeout archive right here. Paper Trail streams it from disk, builds a local index, and lets you search, read, and extract what matters.</p>
-      <ul class="promise-list"><li>No upload. Your mail never crosses the network.</li><li>Works with .mbox and streamed .mbox.gz archives.</li><li>Resume saved indexes and export original .eml files.</li></ul>
-      <div class="hero-actions"><button class="primary" data-action="open">Open an MBOX file</button><button data-action="sample">Try a tiny sample</button><button class="ghost" data-action="import-index">Import saved index</button></div>
-      <p class="file-note">Chrome and Edge can reconnect files after refresh. Firefox and Safari ask you to choose the same file again.</p>
+    <div><p class="eyebrow">Gmail Takeout archive viewer</p><h1>Search your Gmail Takeout archive</h1>
+      <p class="lede">For people finding one needed email. Read messages and export selected emails in this browser.</p>
+      <ul class="promise-list"><li>Choose an archive from your device.</li><li>Search messages, sender, dates, and attachments.</li><li>Try the sample inbox before opening your own.</li></ul>
+      <div class="hero-actions"><button class="primary" data-action="open">Open your Takeout archive</button><a class="button" href="/demo" data-action="demo-link">Try it with sample data</a><button class="ghost" data-action="import-index">Open an index backup</button></div>
+      <p class="file-note">The sample opens an inbox you can search and export.</p>
     </div>
-    <div class="hero-art-wrap"><span class="stamp">Local-only indexing</span><img class="hero-art" src="/assets/hero-archive.webp" width="1152" height="768" fetchpriority="high" alt="A giant accordion-fold archive passing through a hand-cranked indexer into sorted message cards" /></div>
-  </section><div class="trust-strip">ZERO UPLOAD · MEMORY-BOUNDED STREAMING · SAFE, SANDBOXED EMAIL HTML · INSTALLABLE OFFLINE</div>
-  <section class="how" aria-labelledby="how-title"><h2 id="how-title">From archive brick to paper trail.</h2><ol class="steps"><li><strong>Choose the archive</strong><p>Pick the Takeout .mbox or .mbox.gz directly from your drive. The browser grants access only to that file.</p></li><li><strong>Build a small index</strong><p>A worker scans mail boundaries and searchable previews without loading the whole archive into memory.</p></li><li><strong>Search and extract</strong><p>Filter messages, read safe MIME content, download attachments, or collect original messages in a ZIP.</p></li></ol></section>${recent}`);
+    <div class="hero-art-wrap"><span class="stamp">Your archive desk</span><img class="hero-art" src="/assets/hero-archive.webp" width="1152" height="768" fetchpriority="high" alt="A folded email archive passing through a hand-cranked indexer into sorted message cards" /></div>
+  </section>
+  <section class="how" aria-labelledby="how-title"><h2 id="how-title">How you search a Takeout archive</h2><ol class="steps"><li><strong>Choose the archive</strong><p>Open the email archive from your device.</p></li><li><strong>Find a message</strong><p>Search words, sender, date, or attachments.</p></li><li><strong>Export what you need</strong><p>Download an attachment or selected emails.</p></li></ol></section>${recent}`);
+}
+
+function renderNotFound(): void {
+  app.innerHTML = chrome(`<section class="indexing-card not-found"><p class="eyebrow">Missing page</p><h1>This paper trail ends here.</h1><p>That page is not part of Paper Trail.</p><a class="button primary" href="/" data-action="home">Return to your archive desk</a></section>`);
 }
 
 function renderIndexing(): void {
@@ -103,7 +120,7 @@ function renderIndexing(): void {
   app.innerHTML = chrome(`<section class="indexing-card"><p class="eyebrow">Building your local index</p><h1>${esc(file.name)}</h1>
     <div class="progress-track" role="progressbar" aria-label="Indexing progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
     <div class="progress-meta"><span id="progressBytes">Preparing the stream…</span><span id="progressCount">0 messages found</span></div>
-    <p class="index-notes">Keep this tab open. Reading happens in a background worker and memory stays bounded. You can cancel without changing your original file.</p>
+    <p class="index-notes">Keep this tab open while Paper Trail prepares your archive. You can cancel at any time.</p>
     ${file.name.toLowerCase().endsWith('.gz') ? '<p class="pro-note"><strong>About gzip:</strong> indexing is streamed, but opening a result later must decompress up to that message. Extracting the .mbox first gives instant seeking.</p>' : ''}
     <button data-action="cancel-index">Cancel indexing</button></section>`);
 }
@@ -151,7 +168,7 @@ function renderWorkspace(): void {
       <button class="ghost" data-action="clear-filters">Clear filters</button>
       <p class="result-status" aria-live="polite" data-query="${esc(state.query)}"><strong>${filtered.length.toLocaleString()}</strong> of ${state.records.length.toLocaleString()} messages<br><strong>${state.selected.size}</strong> selected${state.searchChecking ? '<br><span>Checking likely full-message matches on this device…</span>' : ''}${state.searchNeedsReconnect ? '<br><span>Reconnect the original archive to check likely full-message matches.</span>' : ''}</p>
       <div class="selection-actions"><button class="primary" data-action="export-eml" ${!state.selected.size ? 'disabled' : ''}>Export selected .eml ZIP</button><button data-action="export-index">Export index CSV</button><button data-action="export-index-json">Back up reusable index</button></div>
-      <p class="pro-note">Free: view, search, attachments, and exports up to 1,000 messages. <button class="ghost" data-action="license">${state.pro ? 'Bulk export unlocked ★' : 'Unlock unlimited bulk export'}</button></p>
+      <p class="pro-note"><button class="ghost" data-action="license">${state.pro ? 'License active ★' : 'Manage bulk export license'}</button></p>
     </aside>
     <section class="message-desk" aria-label="Messages"><div class="list-toolbar"><label class="check-all"><input id="selectPage" type="checkbox" ${shown.length && shown.every((record) => state.selected.has(record.id)) ? 'checked' : ''} /> Select this page</label><span>Page ${state.page + 1} of ${pages}</span></div>
       ${rows ? `<ul class="message-list">${rows}</ul>` : `<div class="empty-state"><div><div class="big-mark" aria-hidden="true">∅</div><h2>No matching mail</h2><p>Try fewer words, clear a date, or check the spelling. Search matches headers and the first 192 KB of each message.</p><button data-action="clear-filters">Clear filters</button></div></div>`}
@@ -183,13 +200,13 @@ function bindGlobalEvents(): void {
     const target = (event.target as Element).closest<HTMLElement>('[data-action]');
     if (!target) return;
     const action = target.dataset.action;
-    if (action === 'home' || action === 'new-archive') { event.preventDefault(); state.view = 'welcome'; resetArchive(); render(); }
+    if (action === 'home' || action === 'new-archive') { event.preventDefault(); state.view = 'welcome'; resetArchive(); navigate('/'); }
+    else if (action === 'demo-link') { event.preventDefault(); void enterDemo(); }
     else if (action === 'open') void chooseFile();
-    else if (action === 'sample') void openSample();
     else if (action === 'import-index') void importIndex();
     else if (action === 'cancel-index') { worker?.postMessage({ type: 'cancel' }); }
     else if (action === 'clear-filters') { clearFilters(); render(); }
-    else if (action === 'back') { returnToResults(); }
+    else if (action === 'back') { history.back(); }
     else if (action === 'reconnect') void reconnectArchive();
     else if (action === 'export-eml') void exportSelected();
     else if (action === 'export-index') exportIndex();
@@ -197,7 +214,101 @@ function bindGlobalEvents(): void {
     else if (action === 'download-eml') void downloadCurrentEml();
     else if (action === 'print') window.print();
     else if (action === 'license') showLicenseDialog();
+    else if (action === 'reset-demo') void resetDemo();
+    else if (action === 'start-real') void leaveDemo();
   });
+}
+
+function routeForArchive(archive: ArchiveRecord): string { return `${state.demo ? '/demo' : ''}/archive/${encodeURIComponent(archive.id)}`; }
+function routeForMessage(archive: ArchiveRecord, id: number): string { return `${routeForArchive(archive)}/message/${id}`; }
+
+function navigate(path: string, replace = false): void {
+  if (location.pathname !== path) history[replace ? 'replaceState' : 'pushState']({}, '', path);
+  setRouteMeta(path);
+  render();
+  queueMicrotask(() => announceRoute());
+}
+
+function setRouteMeta(path = location.pathname): void {
+  const title = path === '/demo' ? 'Demo — Paper Trail' : path === '/privacy/' ? 'Privacy — Paper Trail' : path === '/terms/' ? 'Terms — Paper Trail' : /^(?:\/demo)?\/archive\/.+\/message\//.test(path) ? 'Message — Paper Trail' : /^(?:\/demo)?\/archive\//.test(path) ? 'Archive — Paper Trail' : path === '/' ? 'Paper Trail — search Gmail Takeout archives' : 'Page not found — Paper Trail';
+  const description = path === '/demo' ? 'Search and export Paper Trail’s sample inbox.' : /^(?:\/demo)?\/archive\//.test(path) ? 'Search a Gmail Takeout archive in Paper Trail.' : path === '/' ? 'Search a Gmail Takeout archive in your browser. Read messages and export selected emails.' : 'Return to Paper Trail to search a Gmail Takeout archive.';
+  document.title = title;
+  const canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+  canonical?.setAttribute('href', new URL(path, location.origin).href);
+  document.querySelector<HTMLMetaElement>('meta[name="description"]')?.setAttribute('content', description);
+  document.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.setAttribute('content', title);
+  document.querySelector<HTMLMetaElement>('meta[property="og:description"]')?.setAttribute('content', description);
+  document.querySelector<HTMLMetaElement>('meta[name="twitter:title"]')?.setAttribute('content', title);
+  document.querySelector<HTMLMetaElement>('meta[name="twitter:description"]')?.setAttribute('content', description);
+}
+
+function announceRoute(): void {
+  const heading = document.querySelector<HTMLElement>('main h1');
+  if (!heading) return;
+  heading.tabIndex = -1;
+  heading.focus({ preventScroll: true });
+  const announcement = document.querySelector<HTMLElement>('#route-announcement');
+  if (announcement) announcement.textContent = heading.textContent || document.title;
+}
+
+async function restoreRoute(focus = true): Promise<void> {
+  const path = location.pathname;
+  if (path === '/demo' || path.startsWith('/demo/')) {
+    if (!state.demo) { state.demo = true; setDemoStorage(true); state.archives = await getArchives().catch(() => []); }
+  }
+  setRouteMeta(path);
+  if (path === '/' || path === '/demo') {
+    if (path === '/demo') state.demo = true;
+    state.view = 'welcome';
+    if (state.demo && state.archives[0]) await openSavedArchive(state.archives[0].id, false);
+    else render();
+  } else {
+    const match = path.match(/^(?:\/demo)?\/archive\/([^/]+)(?:\/message\/(\d+))?$/);
+    if (!match) { state.view = 'not-found'; render(); }
+    else {
+      const archiveId = decodeURIComponent(match[1]);
+      const archive = state.archives.find((item) => item.id === archiveId);
+      if (!archive) { state.view = 'not-found'; render(); }
+      else {
+        await openSavedArchive(archiveId, false);
+        if (match[2]) await openMessage(Number(match[2]), false);
+      }
+    }
+  }
+  if (focus) queueMicrotask(() => announceRoute());
+}
+
+async function enterDemo(): Promise<void> {
+  if (state.demo) { navigate('/demo'); return; }
+  state.demo = true;
+  setDemoStorage(true);
+  state.archives = await getArchives().catch(() => []);
+  resetArchive();
+  navigate('/demo');
+  if (state.archives.length) await openSavedArchive(state.archives[0].id, false);
+  else await openSample();
+}
+
+async function resetDemo(): Promise<void> {
+  worker?.terminate(); worker = undefined;
+  await deleteDemoStorage();
+  setDemoStorage(true);
+  state.archives = [];
+  resetArchive();
+  state.view = 'welcome';
+  render();
+  await openSample();
+}
+
+async function leaveDemo(): Promise<void> {
+  worker?.terminate(); worker = undefined;
+  await deleteDemoStorage().catch(() => undefined);
+  state.demo = false;
+  setDemoStorage(false);
+  state.archives = await getArchives().catch(() => []);
+  resetArchive();
+  state.view = 'welcome';
+  navigate('/');
 }
 
 function bindViewEvents(): void {
@@ -302,7 +413,7 @@ async function acceptFile(file: File, handle?: FileSystemFileHandle): Promise<vo
     toast(`That does not match ${state.expected.name}. Choose the original archive.`, 'error'); return;
   }
   if (state.expected) {
-    state.archive = state.expected; state.file = file; state.expected = undefined; state.records = await getMessages(state.archive.id); state.view = 'workspace'; render(); toast('Archive reconnected.', 'success'); return;
+    state.archive = state.expected; state.file = file; state.expected = undefined; state.records = await getMessages(state.archive.id); state.view = 'workspace'; navigate(routeForArchive(state.archive)); toast('Archive reconnected.', 'success'); return;
   }
   const gzip = /\.gz$/i.test(file.name);
   const id = `${file.name}:${file.size}:${file.lastModified}`;
@@ -335,10 +446,10 @@ function startIndexing(file: File, archiveId: string, gzip: boolean): void {
       updateProgress(ratio, data.bytes || 0, data.count || state.records.length, started, gzip);
     } else if (data.type === 'done') {
       void finishIndex(data.count || state.records.length);
-    } else if (data.type === 'cancelled') {
-      state.view = 'welcome'; resetArchive(); render(); toast('Indexing cancelled. The original file was not changed.');
+  } else if (data.type === 'cancelled') {
+      state.view = 'welcome'; resetArchive(); navigate(state.demo ? '/demo' : '/'); toast('Indexing cancelled. The original file was not changed.');
     } else if (data.type === 'error') {
-      state.view = 'welcome'; resetArchive(); render(); toast(data.message || 'Could not index this archive.', 'error', 9000);
+      state.view = 'welcome'; resetArchive(); navigate(state.demo ? '/demo' : '/'); toast(data.message || 'Could not index this archive.', 'error', 9000);
     }
   };
   currentWorker.onerror = () => { state.view = 'welcome'; render(); toast('The indexing worker stopped unexpectedly. Try extracting the archive and opening the .mbox file.', 'error'); };
@@ -354,7 +465,7 @@ async function finishIndex(count: number): Promise<void> {
   state.archives = [state.archive, ...state.archives.filter((item) => item.id !== state.archive!.id)];
   state.view = 'workspace';
   worker?.terminate(); worker = undefined;
-  render();
+  navigate(routeForArchive(state.archive));
   toast(`Indexed ${count.toLocaleString()} messages.`, 'success');
 }
 
@@ -372,20 +483,22 @@ function updateProgress(ratio: number, bytes: number, count: number, started: nu
   if (countText) countText.textContent = `${count.toLocaleString()} messages found`;
 }
 
-async function openSavedArchive(id: string): Promise<void> {
+async function openSavedArchive(id: string, updateRoute = true): Promise<void> {
   const archive = state.archives.find((item) => item.id === id);
   if (!archive) return;
   if (archive.handle) {
     try {
       const permission = await (archive.handle as FileSystemFileHandle & { requestPermission(options: { mode: 'read' }): Promise<PermissionState> }).requestPermission({ mode: 'read' });
       if (permission === 'granted') {
-        state.archive = archive; state.file = await archive.handle.getFile(); state.records = await getMessages(id); state.view = 'workspace'; render(); return;
+        state.archive = archive; state.file = await archive.handle.getFile(); state.records = await getMessages(id); state.view = 'workspace'; if (updateRoute) navigate(routeForArchive(archive)); else render(); return;
       }
     } catch { /* fall through to manual reconnect */ }
   }
   state.expected = archive;
   state.archive = archive;
   state.records = await getMessages(id);
+  if (state.demo) { state.file = await sampleFile(); state.expected = undefined; state.view = 'workspace'; if (updateRoute) navigate(routeForArchive(archive)); else render(); return; }
+  if (!updateRoute) { state.view = 'workspace'; render(); return; }
   toast(`Choose ${archive.name} to reconnect its saved index.`);
   document.querySelector<HTMLInputElement>('#fileInput')?.click();
 }
@@ -397,26 +510,27 @@ async function reconnectArchive(): Promise<void> {
   await chooseFile();
 }
 
-async function openMessage(id: number): Promise<void> {
+async function openMessage(id: number, updateRoute = true): Promise<void> {
   const record = state.records.find((item) => item.id === id);
   if (!record) return;
   // Rendering replaces the row, so retain its stable record ID rather than a
   // detached DOM node. This restores keyboard users to the exact result.
   focusReturnId = id;
-  state.current = record; state.parsed = undefined; state.view = 'reader'; render();
+  state.current = record; state.parsed = undefined; state.view = 'reader';
+  if (updateRoute && state.archive) navigate(routeForMessage(state.archive, id)); else render();
   try {
     const raw = await readRaw(record);
     state.parsed = parseMessage(raw);
     render();
   } catch (error) {
-    state.view = 'workspace'; render(); restoreMessageFocus(); toast(error instanceof Error ? error.message : 'Could not open this message.', 'error');
+    state.view = 'workspace'; if (state.archive) navigate(routeForArchive(state.archive), true); else render(); restoreMessageFocus(); toast(error instanceof Error ? error.message : 'Could not open this message.', 'error');
   }
 }
 
 function returnToResults(): void {
   state.view = 'workspace';
   state.parsed = undefined;
-  render();
+  if (state.archive) navigate(routeForArchive(state.archive)); else render();
   restoreMessageFocus();
 }
 
@@ -535,9 +649,13 @@ function safeEmailHtml(input: string, attachments: ParsedMessage['attachments'])
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline';"><style>body{margin:0;padding:28px;color:#17211d;background:#fffdf5;font:16px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}[data-blocked-image]::after{content:'Remote image blocked'}a{color:#075d76}pre{white-space:pre-wrap}</style></head><body>${doc.body.innerHTML}</body></html>`;
 }
 
+async function sampleFile(): Promise<File> {
+  const sample = `From sender@example.com Thu Aug 27 10:00:00 2026\r\nDate: Thu, 27 Aug 2026 10:00:00 +0000\r\nFrom: Alex Archive <sender@example.com>\r\nTo: You <you@example.com>\r\nSubject: Your first recovered message\r\nMessage-ID: <sample-1@papertrail.local>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nSearch for recovered, select this message, and export the original email.\r\n\r\nFrom records@example.com Fri Aug 28 12:00:00 2026\r\nDate: Fri, 28 Aug 2026 12:00:00 +0000\r\nFrom: Records Desk <records@example.com>\r\nTo: You <you@example.com>\r\nSubject: Receipt from the archive\r\nMessage-ID: <sample-2@papertrail.local>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="papertrail"\r\n\r\n--papertrail\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<h2>Receipt saved for your records</h2><p>This message includes an attachment.</p>\r\n--papertrail\r\nContent-Type: text/plain; name="receipt-note.txt"\r\nContent-Disposition: attachment; filename="receipt-note.txt"\r\n\r\nOrder 4821 — retained for your records.\r\n--papertrail--\r\n\r\nFrom project@example.com Sat Aug 29 09:30:00 2026\r\nDate: Sat, 29 Aug 2026 09:30:00 +0000\r\nFrom: Priya Chen <project@example.com>\r\nTo: You <you@example.com>\r\nSubject: Garden project handoff\r\nMessage-ID: <sample-3@papertrail.local>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nA project handoff you can find by sender, date, or words.\r\n`;
+  return new File([sample], 'paper-trail-sample.mbox', { type: 'application/mbox', lastModified: 1787824800000 });
+}
+
 async function openSample(): Promise<void> {
-  const sample = `From sender@example.com Thu Aug 27 10:00:00 2026\r\nDate: Thu, 27 Aug 2026 10:00:00 +0000\r\nFrom: Alex Archive <sender@example.com>\r\nTo: You <you@example.com>\r\nSubject: Your first recovered message\r\nMessage-ID: <sample-1@papertrail.local>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nThis is a tiny local sample. Search for “recovered”, select it, and export the original EML.\r\n\r\nFrom records@example.com Fri Aug 28 12:00:00 2026\r\nDate: Fri, 28 Aug 2026 12:00:00 +0000\r\nFrom: Records Desk <records@example.com>\r\nTo: You <you@example.com>\r\nSubject: Receipt from the archive\r\nMessage-ID: <sample-2@papertrail.local>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="papertrail"\r\n\r\n--papertrail\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<h2>A safe HTML message</h2><p>Remote scripts and tracking images are blocked.</p>\r\n--papertrail\r\nContent-Type: text/plain; name="note.txt"\r\nContent-Disposition: attachment; filename="note.txt"\r\n\r\nA small recovered attachment.\r\n--papertrail--\r\n`;
-  const file = new File([sample], 'paper-trail-sample.mbox', { type: 'application/mbox', lastModified: 1787824800000 });
+  const file = await sampleFile();
   await acceptFile(file);
 }
 
@@ -545,9 +663,8 @@ function showLicenseDialog(message = ''): void {
   const existing = document.querySelector('.modal-backdrop'); existing?.remove();
   const overlay = document.createElement('div'); overlay.className = 'modal-backdrop';
   overlay.innerHTML = `<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="license-title"><p class="eyebrow">One-time unlock</p><h2 id="license-title">Bulk archive export</h2>
-    ${message ? `<p class="license-status">${esc(message)}</p>` : ''}<p>The free viewer includes unlimited search, reading, attachment downloads, index CSV, and EML ZIPs up to 1,000 messages. The one-time unlock removes that ZIP limit.</p>
-    <p><strong>$19 USD, one time.</strong> Sociobot/Dodo is the merchant of record. No subscription.</p>
-    <a class="button primary" href="${API_BASE}/products/${PRODUCT}/checkout">See price and buy securely</a>
+    ${message ? `<p class="license-status">${esc(message)}</p>` : ''}<p>A license can expand bulk export options. The checkout page shows the current terms.</p>
+    <a class="button primary" href="${API_BASE}/products/${PRODUCT}/checkout">View license options</a>
     <hr><div class="field"><label for="licenseToken">Have a license? Paste it</label><input id="licenseToken" type="text" autocomplete="off" spellcheck="false" placeholder="License token" /></div>
     <p id="licenseMessage" aria-live="polite">${state.pro ? 'This device has an active bulk-export license.' : 'Verification needs a brief internet connection.'}</p>
     <div class="dialog-actions"><button data-dialog="close">Close</button><button class="secondary" data-dialog="verify">Verify license</button></div><p><small><a href="/privacy/">Privacy</a> · <a href="/terms/">Terms and refunds</a></small></p></section>`;

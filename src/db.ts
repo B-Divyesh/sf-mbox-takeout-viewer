@@ -11,12 +11,31 @@ export interface ArchiveRecord {
   handle?: FileSystemFileHandle;
 }
 
-const DB_NAME = 'paper-trail-index';
+const REAL_DB_NAME = 'paper-trail-index';
+const DEMO_DB_NAME = 'demo:paper-trail-index';
+let dbName = REAL_DB_NAME;
 const DB_VERSION = 1;
+
+/** Select storage before any archive operation. Demo storage is deliberately a
+ * different IndexedDB database, not merely a different record key. */
+export function setDemoStorage(isDemo: boolean): void {
+  dbName = isDemo ? DEMO_DB_NAME : REAL_DB_NAME;
+}
+
+export function currentDatabaseName(): string { return dbName; }
+
+export function deleteDemoStorage(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(DEMO_DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onblocked = () => reject(new Error('Close the other demo tab, then reset the demo again.'));
+    request.onerror = () => reject(request.error);
+  });
+}
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(dbName, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains('archives')) db.createObjectStore('archives', { keyPath: 'id' });

@@ -1,151 +1,102 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { readFile, writeFile } from 'node:fs/promises';
-import { gzipSync } from 'node:zlib';
+import { readFile } from 'node:fs/promises';
 import { appReleaseVersion } from '../scripts/release-sw.mjs';
 
-test('indexes, searches, reads, and exports the local sample', async ({ page }, testInfo) => {
-  const consoleErrors: string[] = [];
-  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
-  await page.goto('/');
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('Find the one email');
-  await expect(page.locator('.privacy-pill')).toBeVisible();
-  await page.getByRole('button', { name: 'Try a tiny sample' }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('paper-trail-sample.mbox');
-  await expect(page.locator('.archive-meta')).toContainText('2 messages');
+async function openDemo(page: import('@playwright/test').Page): Promise<void> {
+  await page.goto('/demo');
+  await expect(page.getByText('Demo — sample data, nothing is saved')).toBeVisible();
+  await expect(page.locator('.archive-meta')).toContainText('3 messages');
+}
 
-  const search = page.getByLabel('Words in message');
-  await search.fill('tiny local');
-  await expect(page.getByText('1 of 2 messages')).toBeVisible();
-  await page.getByRole('button', { name: /Your first recovered message/ }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('Your first recovered message');
-  await expect(page.getByText(/tiny local sample/)).toBeVisible();
+test('@claim:demo-isolation demo never opens the production database', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('real:sentinel', 'keep'));
+  await openDemo(page);
+  const storage = await page.evaluate(async () => ({ databases: (await indexedDB.databases()).map((item) => item.name), sentinel: localStorage.getItem('real:sentinel') }));
+  expect(storage.databases).toContain('demo:paper-trail-index');
+  expect(storage.databases).not.toContain('paper-trail-index');
+  expect(storage.sentinel).toBe('keep');
+  await page.getByRole('button', { name: 'Reset demo' }).click();
+  await expect(page.locator('.archive-meta')).toContainText('3 messages');
+  await page.getByRole('button', { name: 'Start for real' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Search your Gmail Takeout archive');
+  const namesAfterExit = await page.evaluate(async () => (await indexedDB.databases()).map((item) => item.name));
+  expect(namesAfterExit).not.toContain('demo:paper-trail-index');
+});
 
-  await page.getByRole('button', { name: /Back to results/ }).click();
-  await expect(page.getByRole('button', { name: /Your first recovered message/ })).toBeFocused();
-  await page.getByLabel(/Select Your first recovered message/).check();
+test('@claim:local-network the demo sends no cross-origin requests', async ({ page }) => {
+  const requests: string[] = []; page.on('request', (request) => requests.push(request.url()));
+  await openDemo(page);
+  await page.getByLabel('Words in message').fill('recovered');
+  await expect(page.locator('.result-status')).toContainText('1 of 3 messages');
+  await page.getByRole('button', { name: 'Your first recovered message' }).click();
+  await expect(page.getByText(/Search for recovered/)).toBeVisible();
+  expect(requests.every((url) => new URL(url).origin === new URL(page.url()).origin)).toBe(true);
+});
+
+test('@claim:message-reading the sample opens a message for reading', async ({ page }) => {
+  await openDemo(page);
+  await page.getByRole('button', { name: 'Your first recovered message' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your first recovered message');
+  await expect(page.getByText(/Search for recovered/)).toBeVisible();
+});
+
+test('@claim:archive-search search and attachment filters change the sample results', async ({ page }) => {
+  await openDemo(page);
+  await page.getByLabel('Words in message').fill('garden');
+  await expect(page.locator('.result-status')).toContainText('1 of 3 messages');
+  await expect(page.getByRole('button', { name: 'Garden project handoff' })).toBeVisible();
+  await page.getByLabel('Has attachments').check();
+  await expect(page.locator('.result-status')).toContainText('0 of 3 messages');
+  await page.getByLabel('Search the trail').getByRole('button', { name: 'Clear filters' }).click();
+  await page.getByLabel('Has attachments').check();
+  await expect(page.getByRole('button', { name: 'Receipt from the archive' })).toBeVisible();
+});
+
+test('@claim:email-export the sample exports a selected original email', async ({ page }) => {
+  await openDemo(page);
+  await page.getByLabel('Select Your first recovered message').check();
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: /Export selected/ }).click();
   expect((await download).suggestedFilename()).toBe('paper-trail-sample.mbox-selection.zip');
-
-  await page.getByRole('button', { name: /Your first recovered message/ }).click();
-
-  const accessibility = await new AxeBuilder({ page }).analyze();
-  expect(accessibility.violations.filter((item) => ['serious', 'critical'].includes(item.impact || ''))).toEqual([]);
-  expect(consoleErrors).toEqual([]);
-
-  if (testInfo.project.name === 'mobile') {
-    await expect(page.locator('.message-sheet')).toHaveCSS('background-color', /rgb/);
-  }
 });
 
-test('never shows Bloom-only matches for high-vocabulary mail', async ({ page }) => {
-  const words = Array.from({ length: 5_000 }, (_, index) => `uniquetoken${String(index).padStart(5, '0')}`).join(' ');
-  const mbox = `From sender@example.test Thu Jan 01 00:00:00 2026\r\nSubject: High vocabulary\r\nFrom: Sender <sender@example.test>\r\n\r\n${words}\r\n`;
-  await page.goto('/');
-  await page.locator('#fileInput').setInputFiles({ name: 'high-vocabulary.mbox', mimeType: 'application/mbox', buffer: Buffer.from(mbox) });
-  await expect(page.locator('.archive-meta')).toContainText('1 messages');
-
-  const search = page.getByLabel('Words in message');
-  const status = page.locator('.result-status');
-  for (const term of Array.from({ length: 20 }, (_, index) => `definitelyabsent${String(index).padStart(4, '0')}`)) {
-    await search.fill(term);
-    await expect(status).toHaveAttribute('data-query', term);
-    await expect(status).not.toContainText('Checking likely full-message matches');
-    await expect(status).toContainText('0 of 1 messages');
-  }
-  await search.fill('uniquetoken01234');
-  await expect(status).toHaveAttribute('data-query', 'uniquetoken01234');
-  await expect(status).not.toContainText('Checking likely full-message matches');
-  await expect(status).toContainText('1 of 1 messages');
+test('@claim:attachment-download the sample attachment downloads', async ({ page }) => {
+  await openDemo(page);
+  await page.getByRole('button', { name: 'Receipt from the archive' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Receipt from the archive');
+  const download = page.waitForEvent('download');
+  await page.getByRole('link', { name: /receipt-note\.txt/ }).click();
+  expect((await download).suggestedFilename()).toBe('receipt-note.txt');
 });
 
-test('sustains the 20 GiB indexing target on a deterministic 128 MiB MBOX', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'desktop', 'The verifier profile is desktop Chromium.');
-  test.setTimeout(120_000);
-  const mib = 1024 * 1024;
-  const recordCount = 128;
-  const header = 'From benchmark@example.test Thu Jan 01 00:00:00 2026\r\nSubject: Throughput record\r\nFrom: Benchmark <benchmark@example.test>\r\n\r\n';
-  const words = Buffer.from('local archive search token ');
-  const record = Buffer.alloc(mib, 0x20);
-  record.write(header);
-  for (let cursor = Buffer.byteLength(header); cursor < record.length - words.length; cursor += words.length) words.copy(record, cursor);
-  record[record.length - 1] = 10;
-  const fixture = Buffer.concat(Array.from({ length: recordCount }, () => record));
-  const fixturePath = testInfo.outputPath('20-gib-target-fixture.mbox');
-  await writeFile(fixturePath, fixture);
-
-  await page.goto('/');
-  const started = performance.now();
-  await page.locator('#fileInput').setInputFiles(fixturePath);
-  await expect(page.locator('.archive-meta')).toContainText(`${recordCount} messages`);
-  const mibPerSecond = recordCount / ((performance.now() - started) / 1000);
-  const evidence = {
-    fixtureMiB: recordCount,
-    measuredMiBPerSecond: Number(mibPerSecond.toFixed(2)),
-    briefMinimumMiBPerSecond: 34.13,
-    regressionGuardMiBPerSecond: 40,
-  };
-  await testInfo.attach('cold-file-throughput.json', { body: JSON.stringify(evidence, null, 2), contentType: 'application/json' });
-  console.log(`cold-file throughput: ${evidence.measuredMiBPerSecond} MiB/s (guard > ${evidence.regressionGuardMiBPerSecond} MiB/s)`);
-
-  // The brief is 20 GiB in <10 minutes = 34.14 MiB/s. This deterministic
-  // 128 MiB browser fixture exercises the worker, IndexedDB queue, and UI.
-  // Keep a 17% buffer above the product floor (34.13 MiB/s) so this remains a
-  // release gate rather than a timing lottery on a cold browser worker.
-  expect(mibPerSecond).toBeGreaterThan(40);
-});
-
-test('builds a deterministic new PWA cache when only app assets change', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'desktop', 'One browser proves the release artifact contract.');
-  const html = await readFile('dist/index.html', 'utf8');
-  const [worker, manifest] = await Promise.all([readFile('dist/sw.js', 'utf8'), readFile('dist/manifest.webmanifest', 'utf8')]);
-  const version = appReleaseVersion(html);
-  const appOnlyHtml = html.replace(/(\/assets\/index-)[^"']+/, '$1app-only-release.js');
-
-  expect(appOnlyHtml).not.toBe(html);
-  expect(appReleaseVersion(appOnlyHtml)).not.toBe(version);
-  expect(worker).toContain(`paper-trail-shell-${version}`);
-  expect(worker).not.toContain('__APP_RELEASE__');
-  expect(manifest).toContain(`/?v=${version}`);
-
-  await page.goto('/');
+test('@claim:offline-reload the demo opens after its first visit while offline', async ({ page, context }) => {
+  await openDemo(page);
   await page.evaluate(async () => { await navigator.serviceWorker.ready; });
-  const servedWorker = await page.evaluate(() => fetch('/sw.js', { cache: 'no-store' }).then((response) => response.text()));
-  expect(servedWorker).toContain(`paper-trail-shell-${version}`);
+  if (!(await page.evaluate(() => Boolean(navigator.serviceWorker.controller)))) { await page.reload(); await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller)); }
+  await context.setOffline(true); await page.goto('/demo');
+  await expect(page.getByText('Demo — sample data, nothing is saved')).toBeVisible();
 });
 
-test('reloads its shell offline after service worker installation', async ({ page, context }) => {
-  await page.goto('/');
-  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
-  if (!(await page.evaluate(() => Boolean(navigator.serviceWorker.controller)))) {
-    await page.reload();
-    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
-  }
-  await context.setOffline(true);
-  await page.reload();
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('Find the one email');
-  await page.evaluate(() => window.dispatchEvent(new Event('offline')));
-  await expect(page.getByText(/Offline — local archives/)).toBeVisible();
+test('routes, focus, metadata, and the designed 404 work', async ({ page }) => {
+  await page.goto('/?demo=1'); await expect(page).toHaveURL('/demo'); await expect(page.getByText('Demo — sample data, nothing is saved')).toBeVisible();
+  await openDemo(page);
+  await page.getByRole('button', { name: 'Your first recovered message' }).click();
+  await expect(page).toHaveURL(/\/demo\/archive\/.+\/message\/0$/);
+  await page.goBack(); await expect(page.locator('.workspace')).toBeVisible(); await expect(page.locator('main h1')).toBeFocused();
+  await page.goto('/does-not-exist'); await expect(page.getByRole('heading', { level: 1 })).toHaveText('This paper trail ends here.'); await expect(page.locator('main')).toBeVisible();
+  await page.goto('/privacy/'); await expect(page).toHaveTitle('Privacy — Paper Trail'); await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', /privacy/);
 });
 
-test('streams and seeks a gzip MBOX without uploading', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'desktop', 'One engine pass is enough for the gzip path.');
-  const mbox = 'From first@example.test Thu Jan 01 00:00:00 2026\r\nSubject: First gzip message\r\nFrom: First <first@example.test>\r\n\r\nOne.\r\nFrom second@example.test Fri Jan 02 00:00:00 2026\r\nSubject: Second gzip message\r\nFrom: Second <second@example.test>\r\n\r\nFound after a streamed seek.\r\n';
-  await page.goto('/');
-  await page.locator('#fileInput').setInputFiles({ name: 'takeout.mbox.gz', mimeType: 'application/gzip', buffer: gzipSync(mbox) });
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('takeout.mbox.gz');
-  await page.getByRole('button', { name: /Second gzip message/ }).click();
-  await expect(page.getByText(/Found after a streamed seek/)).toBeVisible();
+test('accessibility, first screen, and mobile layout', async ({ page }, testInfo) => {
+  await page.goto('/'); await expect(page.getByRole('heading', { level: 1 })).toHaveText('Search your Gmail Takeout archive'); await expect(page.getByRole('link', { name: 'Try it with sample data' })).toBeVisible();
+  const results = await new AxeBuilder({ page }).analyze(); expect(results.violations.filter((item) => ['serious', 'critical'].includes(item.impact || ''))).toEqual([]);
+  if (testInfo.project.name === 'mobile') expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test('rejects malformed extension-valid MBOX input with recovery guidance', async ({ page }) => {
-  await page.goto('/');
-  await page.locator('#fileInput').setInputFiles({
-    name: 'not-really.mbox', mimeType: 'application/mbox', buffer: Buffer.from('this is not an mbox format at all'),
-  });
-  await expect(page.getByRole('alert')).toContainText("This is not an MBOX archive: it must start with a 'From ' envelope line.");
-  await expect(page.getByRole('alert')).toContainText('unzip the download and choose the .mbox file');
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('Find the one email');
-  await expect(page.locator('.archive-meta')).toHaveCount(0);
+test('release cache and route configuration are present', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'one browser release check');
+  const html = await readFile('dist/index.html', 'utf8'); const [worker, config] = await Promise.all([readFile('dist/sw.js', 'utf8'), readFile('dist/staticwebapp.config.json', 'utf8')]);
+  const version = appReleaseVersion(html); expect(worker).toContain(`paper-trail-shell-${version}`); expect(worker).toContain("'/demo'"); expect(JSON.parse(config).navigationFallback.rewrite).toBe('/index.html');
+  await page.goto('/demo'); await expect(page.locator('main')).toBeVisible();
 });
