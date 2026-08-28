@@ -38,7 +38,19 @@ npm run test:e2e       PASS — 11 passed, 3 intentional mobile skips
 
 ## Deployment and live identity
 
-Push this repair and deploy the generated `dist/` directory using the repository's static deployment configuration (`public/staticwebapp.config.json`). After propagation, verify the live root, hashed JS/CSS, and `sw.js` SHA-256 against this build, then run the controlled offline/update smoke on `https://mbox-takeout-viewer.sociobot.in/`.
+Deployed the verified `dist/` with `/opt/fleet/lib/deploy-static.sh mbox-takeout-viewer dist`. Azure Static Web Apps deployment `ffdfc5ac-1e9b-4132-9500-fddfb0f842c1` completed successfully to `https://agreeable-sky-0568bf50f.7.azurestaticapps.net`, and the custom production domain returned HTTPS 200.
+
+Live identity matches the local production build byte-for-byte:
+
+```text
+index.html                  63dc420d91804ccee381b4193ca8d8c343cbcc88fffc5f724ecd415891ee97c6
+assets/index-C6EqJmRY.js   18e81a1374e45beb7c31d14f09c75a1156c9d260472a6f8aaacae7c85ec7e071
+assets/index-Csjz8eFL.css  af7578b16aff7f92262bc7b4eeb3f474e20462eb376d700040ec88585b45c8fd
+sw.js                       24679efd6a4f72bc7312e3f11c0254acda69e229ff6f2bac7560758cb7761151
+```
+
+- Live 390×844 Chromium repeated all 20 guaranteed-absent high-vocabulary searches (`0 of 1 messages`) and then found `uniquetoken01234` outside the compact preview (`1 of 1 messages`), with no console errors, no third-party requests, and no horizontal overflow.
+- Live root and `sw.js` are `no-cache`; both content-hashed assets are `public, max-age=31536000, immutable`. The live response includes HSTS, CSP, Permissions-Policy, Referrer-Policy, `X-Frame-Options: DENY`, and `X-Content-Type-Options: nosniff`.
 
 ## Known gaps / next steps
 
