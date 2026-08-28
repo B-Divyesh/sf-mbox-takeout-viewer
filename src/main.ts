@@ -1,7 +1,7 @@
 import './styles.css';
 import IndexWorker from './indexer.worker?worker';
 import { deleteArchive, getArchives, getMessages, saveArchive, saveMessages, type ArchiveRecord } from './db';
-import { bloomHas, formatBytes, parseMessage, safeFilename, type MessageRecord, type ParsedMessage } from './parser';
+import { bloomHas, formatBytes, parseMessage, safeFilename, SEARCH_SCOPE_BYTES, searchPrefixContainsTerms, type MessageRecord, type ParsedMessage } from './parser';
 import { createZip, type ZipEntry } from './zip';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -29,17 +29,22 @@ interface AppState {
   pro: boolean;
   expected?: ArchiveRecord;
   online: boolean;
+  verifiedSearchIds: Set<number>;
+  searchChecking: boolean;
+  searchNeedsReconnect: boolean;
 }
 
 const state: AppState = {
   view: 'welcome', archives: [], records: [], query: '', sender: '', fromDate: '', toDate: '', online: navigator.onLine,
   hasAttachments: false, sort: 'newest', selected: new Set(), page: 0, pro: readCachedLicense(),
+  verifiedSearchIds: new Set(), searchChecking: false, searchNeedsReconnect: false,
 };
 let worker: Worker | undefined;
 let saveQueue = Promise.resolve();
 let persistenceFailed = false;
 let focusReturnId: number | undefined;
 let activeObjectUrls: string[] = [];
+let searchVerificationId = 0;
 
 void init();
 
@@ -106,7 +111,12 @@ function renderIndexing(): void {
 function filteredRecords(): MessageRecord[] {
   const terms = state.query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
   let list = state.records.filter((record) => {
-    if (terms.length && !terms.every((term) => record.search.includes(term) || bloomHas(record.bloom, term))) return false;
+    if (terms.length) {
+      const indexedMatch = terms.every((term) => record.search.includes(term));
+      // Bloom membership can only rule a record out. A likely hit outside the
+      // compact exact preview appears only after its original bytes verify it.
+      if (!indexedMatch && (!terms.every((term) => record.search.includes(term) || bloomHas(record.bloom, term)) || !state.verifiedSearchIds.has(record.id))) return false;
+    }
     if (state.sender && !record.from.toLocaleLowerCase().includes(state.sender.toLocaleLowerCase())) return false;
     if (state.fromDate && (!record.date || record.date.slice(0, 10) < state.fromDate)) return false;
     if (state.toDate && (!record.date || record.date.slice(0, 10) > state.toDate)) return false;
@@ -139,7 +149,7 @@ function renderWorkspace(): void {
       <label class="check-all"><input id="hasAttachments" type="checkbox" ${state.hasAttachments ? 'checked' : ''} /> Has attachments</label>
       <div class="field"><label for="sort">Order</label><select id="sort"><option value="newest" ${state.sort === 'newest' ? 'selected' : ''}>Newest first</option><option value="oldest" ${state.sort === 'oldest' ? 'selected' : ''}>Oldest first</option><option value="archive" ${state.sort === 'archive' ? 'selected' : ''}>Archive order</option></select></div>
       <button class="ghost" data-action="clear-filters">Clear filters</button>
-      <p class="result-status" aria-live="polite"><strong>${filtered.length.toLocaleString()}</strong> of ${state.records.length.toLocaleString()} messages<br><strong>${state.selected.size}</strong> selected</p>
+      <p class="result-status" aria-live="polite" data-query="${esc(state.query)}"><strong>${filtered.length.toLocaleString()}</strong> of ${state.records.length.toLocaleString()} messages<br><strong>${state.selected.size}</strong> selected${state.searchChecking ? '<br><span>Checking likely full-message matches on this device…</span>' : ''}${state.searchNeedsReconnect ? '<br><span>Reconnect the original archive to check likely full-message matches.</span>' : ''}</p>
       <div class="selection-actions"><button class="primary" data-action="export-eml" ${!state.selected.size ? 'disabled' : ''}>Export selected .eml ZIP</button><button data-action="export-index">Export index CSV</button><button data-action="export-index-json">Back up reusable index</button></div>
       <p class="pro-note">Free: view, search, attachments, and exports up to 1,000 messages. <button class="ghost" data-action="license">${state.pro ? 'Bulk export unlocked ★' : 'Unlock unlimited bulk export'}</button></p>
     </aside>
@@ -204,7 +214,9 @@ function bindViewEvents(): void {
     render();
   });
   const updateFilter = (id: string, key: 'query' | 'sender' | 'fromDate' | 'toDate') => document.querySelector<HTMLInputElement>(`#${id}`)?.addEventListener('input', (event) => {
-    state[key] = (event.target as HTMLInputElement).value; state.page = 0; debounceRender();
+    state[key] = (event.target as HTMLInputElement).value; state.page = 0;
+    if (key === 'query') invalidateSearchVerification();
+    debounceRender(key === 'query');
   });
   updateFilter('search', 'query'); updateFilter('sender', 'sender'); updateFilter('fromDate', 'fromDate'); updateFilter('toDate', 'toDate');
   document.querySelector<HTMLInputElement>('#hasAttachments')?.addEventListener('change', (event) => { state.hasAttachments = (event.target as HTMLInputElement).checked; state.page = 0; render(); });
@@ -215,7 +227,61 @@ function bindViewEvents(): void {
 }
 
 let renderTimer = 0;
-function debounceRender(): void { window.clearTimeout(renderTimer); renderTimer = window.setTimeout(render, 180); }
+function debounceRender(verifySearch = false): void {
+  window.clearTimeout(renderTimer);
+  renderTimer = window.setTimeout(() => {
+    render();
+    if (verifySearch) void verifyLikelySearchMatches();
+  }, 180);
+}
+
+function searchTerms(): string[] { return state.query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean); }
+
+function indexedQueryMatch(record: MessageRecord, terms: string[]): boolean {
+  return terms.every((term) => record.search.includes(term));
+}
+
+function likelyQueryMatch(record: MessageRecord, terms: string[]): boolean {
+  return terms.every((term) => record.search.includes(term) || bloomHas(record.bloom, term));
+}
+
+function invalidateSearchVerification(): void {
+  searchVerificationId++;
+  state.verifiedSearchIds.clear();
+  state.searchChecking = Boolean(searchTerms().length);
+  state.searchNeedsReconnect = false;
+}
+
+async function verifyLikelySearchMatches(): Promise<void> {
+  const terms = searchTerms();
+  const verificationId = searchVerificationId;
+  if (!terms.length) { state.searchChecking = false; state.searchNeedsReconnect = false; return; }
+  const candidates = state.records.filter((record) => !indexedQueryMatch(record, terms) && likelyQueryMatch(record, terms));
+  if (!candidates.length) {
+    if (verificationId === searchVerificationId) { state.searchChecking = false; state.searchNeedsReconnect = false; render(); }
+    return;
+  }
+  if (!state.file) {
+    if (verificationId === searchVerificationId) { state.searchChecking = false; state.searchNeedsReconnect = true; render(); }
+    return;
+  }
+  const confirmed = new Set<number>();
+  for (const record of candidates) {
+    try {
+      if (searchPrefixContainsTerms(await readSearchPrefix(record), terms)) confirmed.add(record.id);
+    } catch {
+      // A candidate whose local bytes cannot be read is never presented as a
+      // match. The reader/export path supplies the actionable recovery error.
+    }
+    if (verificationId !== searchVerificationId) return;
+  }
+  if (verificationId === searchVerificationId) {
+    state.verifiedSearchIds = confirmed;
+    state.searchChecking = false;
+    state.searchNeedsReconnect = false;
+    render();
+  }
+}
 
 async function chooseFile(): Promise<void> {
   const picker = (window as unknown as { showOpenFilePicker?: (options: object) => Promise<FileSystemFileHandle[]> }).showOpenFilePicker;
@@ -361,8 +427,16 @@ function restoreMessageFocus(): void {
 }
 
 async function readRaw(record: MessageRecord): Promise<Uint8Array> {
+  return readRecordRange(record, record.end);
+}
+
+async function readSearchPrefix(record: MessageRecord): Promise<Uint8Array> {
+  return readRecordRange(record, Math.min(record.end, record.start + SEARCH_SCOPE_BYTES));
+}
+
+async function readRecordRange(record: MessageRecord, end: number): Promise<Uint8Array> {
   if (!state.file) throw new Error('Reconnect the original archive before opening or exporting a message.');
-  if (!state.archive?.gzip) return new Uint8Array(await state.file.slice(record.start, record.end).arrayBuffer());
+  if (!state.archive?.gzip) return new Uint8Array(await state.file.slice(record.start, end).arrayBuffer());
   if (!('DecompressionStream' in window)) throw new Error('This browser cannot read gzip streams. Extract the .mbox file first.');
   const reader = state.file.stream().pipeThrough(new DecompressionStream('gzip')).getReader();
   let offset = 0;
@@ -372,12 +446,12 @@ async function readRaw(record: MessageRecord): Promise<Uint8Array> {
     const { done, value } = await reader.read();
     if (done) break;
     const chunkEnd = offset + value.length;
-    if (chunkEnd > record.start && offset < record.end) {
-      const part = value.slice(Math.max(0, record.start - offset), Math.min(value.length, record.end - offset));
+    if (chunkEnd > record.start && offset < end) {
+      const part = value.slice(Math.max(0, record.start - offset), Math.min(value.length, end - offset));
       chunks.push(part); total += part.length;
     }
     offset = chunkEnd;
-    if (offset >= record.end) { await reader.cancel(); break; }
+    if (offset >= end) { await reader.cancel(); break; }
   }
   const output = new Uint8Array(total); let position = 0;
   for (const chunk of chunks) { output.set(chunk, position); position += chunk.length; }

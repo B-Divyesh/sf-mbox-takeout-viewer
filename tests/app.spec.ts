@@ -39,6 +39,27 @@ test('indexes, searches, reads, and exports the local sample', async ({ page }, 
   }
 });
 
+test('never shows Bloom-only matches for high-vocabulary mail', async ({ page }) => {
+  const words = Array.from({ length: 5_000 }, (_, index) => `uniquetoken${String(index).padStart(5, '0')}`).join(' ');
+  const mbox = `From sender@example.test Thu Jan 01 00:00:00 2026\r\nSubject: High vocabulary\r\nFrom: Sender <sender@example.test>\r\n\r\n${words}\r\n`;
+  await page.goto('/');
+  await page.locator('#fileInput').setInputFiles({ name: 'high-vocabulary.mbox', mimeType: 'application/mbox', buffer: Buffer.from(mbox) });
+  await expect(page.locator('.archive-meta')).toContainText('1 messages');
+
+  const search = page.getByLabel('Words in message');
+  const status = page.locator('.result-status');
+  for (const term of Array.from({ length: 20 }, (_, index) => `definitelyabsent${String(index).padStart(4, '0')}`)) {
+    await search.fill(term);
+    await expect(status).toHaveAttribute('data-query', term);
+    await expect(status).not.toContainText('Checking likely full-message matches');
+    await expect(status).toContainText('0 of 1 messages');
+  }
+  await search.fill('uniquetoken01234');
+  await expect(status).toHaveAttribute('data-query', 'uniquetoken01234');
+  await expect(status).not.toContainText('Checking likely full-message matches');
+  await expect(status).toContainText('1 of 1 messages');
+});
+
 test('sustains the 20 GiB indexing target on a deterministic 128 MiB MBOX', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'The verifier profile is desktop Chromium.');
   test.setTimeout(120_000);

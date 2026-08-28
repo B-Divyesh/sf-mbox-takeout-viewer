@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BLOOM_BYTES, bloomAdd, bloomHas, decodeHeader, formatBytes, indexRecordFromPrefix, parseMessage, safeFilename } from './parser';
+import { BLOOM_BYTES, bloomAdd, bloomHas, decodeHeader, formatBytes, indexRecordFromPrefix, parseMessage, safeFilename, searchPrefixContainsTerms } from './parser';
 import { createZip } from './zip';
 
 const encode = (value: string) => new TextEncoder().encode(value);
@@ -34,6 +34,20 @@ describe('mail parsing', () => {
     const encoded = btoa(String.fromCharCode(...bloom));
     expect(bloomHas(encoded, 'NeedleInAHaystack')).toBe(true);
     expect(bloomHas(encoded, 'definitely-absent')).toBe(false);
+  });
+
+  it('confirms likely Bloom hits against original bytes before accepting them', () => {
+    const source = encode(`From sender@example.test Thu Jan 01 00:00:00 2026\r\nSubject: Vocabulary\r\n\r\n${Array.from({ length: 5_000 }, (_, index) => `uniquetoken${String(index).padStart(5, '0')}`).join(' ')}`);
+    const bloom = new Uint8Array(BLOOM_BYTES);
+    for (let index = 0; index < 5_000; index++) bloomAdd(bloom, `uniquetoken${String(index).padStart(5, '0')}`);
+    const encoded = btoa(String.fromCharCode(...bloom));
+
+    // At this vocabulary density a 1 KiB Bloom filter has false positives;
+    // it is a candidate filter, never search-result evidence.
+    const absent = Array.from({ length: 20 }, (_, index) => `definitelyabsent${String(index).padStart(4, '0')}`);
+    expect(absent.some((term) => bloomHas(encoded, term))).toBe(true);
+    expect(absent.every((term) => !searchPrefixContainsTerms(source, [term]))).toBe(true);
+    expect(searchPrefixContainsTerms(source, ['uniquetoken01234'])).toBe(true);
   });
 });
 

@@ -1,9 +1,9 @@
-import { BLOOM_BYTES, bloomAddHashPair, indexRecordFromPrefix, type MessageRecord } from './parser';
+import { BLOOM_BYTES, bloomAddHashPair, indexRecordFromPrefix, SEARCH_SCOPE_BYTES, type MessageRecord } from './parser';
 
 export const PREFIX_LIMIT = 65_536;
 // 192 KiB preserves useful body-search coverage beyond the preview while
 // preventing a single giant HTML/base64 message from monopolising indexing.
-export const WHOLE_MESSAGE_SEARCH_LIMIT = 192 * 1024;
+export const WHOLE_MESSAGE_SEARCH_LIMIT = SEARCH_SCOPE_BYTES;
 const DISTINCT_TOKEN_LIMIT = 4096;
 // A small fixed hash table is deliberately quicker than Map here. A common
 // newsletter can contain millions of repeated words; checking a typed-array

@@ -36,6 +36,10 @@ export interface ParsedMessage {
 
 const decoder = new TextDecoder('utf-8', { fatal: false });
 const encoder = new TextEncoder();
+// This is the user-visible full-text search scope. The scanner uses a Bloom
+// filter only to find likely records in this range; candidates are confirmed
+// against these original bytes before they can appear in results.
+export const SEARCH_SCOPE_BYTES = 192 * 1024;
 // The Bloom filter covers the first 192 KiB of every message. Keeping this
 // display/search prefix compact avoids repeatedly normalising 64 KiB of HTML
 // and quoted mail for every record in a multi-gigabyte archive.
@@ -96,6 +100,15 @@ export function indexRecordFromPrefix(prefix: Uint8Array, base: Omit<MessageReco
     snippet,
     search: `${subject}\n${from}\n${to}\n${headerText}\n${cleanBody}`.toLocaleLowerCase().slice(0, 4_096),
   };
+}
+
+/**
+ * Checks the original bounded message prefix, never an approximate index.
+ * Query terms intentionally retain the UI's existing substring semantics.
+ */
+export function searchPrefixContainsTerms(prefix: Uint8Array, terms: string[]): boolean {
+  const source = decoder.decode(prefix).toLocaleLowerCase();
+  return terms.every((term) => source.includes(term));
 }
 
 export const BLOOM_BYTES = 1024;
