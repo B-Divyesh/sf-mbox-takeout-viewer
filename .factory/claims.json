@@ -1,6 +1,7 @@
 [
   {"id":"demo-isolation","claim":"Demo — sample data, nothing is saved","where":"demo banner","test":"npm run test:e2e -- --project=desktop --grep @claim:demo-isolation","sandbox":"fresh context; confirms separate, resettable demo storage"},
   {"id":"local-network","claim":"Your archive stays in this browser","where":"privacy policy","test":"npm run test:e2e -- --project=desktop --grep @claim:local-network","sandbox":"fresh demo flow; every request is asserted same-origin"},
+  {"id":"no-tracking","claim":"Paper Trail has no advertising or analytics","where":"privacy policy","test":"npm run test:e2e -- --project=desktop --grep @claim:no-tracking","sandbox":"fresh demo flow; all requests are asserted same-origin"},
   {"id":"message-reading","claim":"Read messages","where":"landing and README","test":"npm run test:e2e -- --project=desktop --grep @claim:message-reading","sandbox":"fresh demo; opens a message and asserts its body"},
   {"id":"archive-search","claim":"Search messages, sender, dates, and attachments","where":"landing and archive filters","test":"npm run test:e2e -- --project=desktop --grep @claim:archive-search","sandbox":"fresh demo; search and attachment filter assert results"},
   {"id":"email-export","claim":"Export selected emails","where":"landing and archive toolbar","test":"npm run test:e2e -- --project=desktop --grep @claim:email-export","sandbox":"fresh demo; selected message produces a ZIP download"},

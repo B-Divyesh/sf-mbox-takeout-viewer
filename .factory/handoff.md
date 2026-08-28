@@ -24,7 +24,7 @@ From a fresh clone of repair commit `e2e0cb45d6f988c061e2282025afe18fb162f0e0`:
 npm ci                         passed (174 packages; 0 vulnerabilities)
 npm run build                  passed; dist/index.html produced
 npm test                       passed; 13 tests
-npm run test:e2e               passed; 19 passed, 1 release-only mobile skip
+npm run test:e2e               passed; 21 passed, 1 release-only mobile skip
 npm run test:headers           passed
 ```
 
@@ -33,6 +33,7 @@ Every registry command passed individually on desktop Chromium:
 ```text
 @claim:demo-isolation          passed
 @claim:local-network           passed
+@claim:no-tracking             passed
 @claim:message-reading         passed
 @claim:archive-search          passed
 @claim:email-export            passed

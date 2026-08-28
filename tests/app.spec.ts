@@ -34,6 +34,13 @@ test('@claim:local-network the demo sends no cross-origin requests', async ({ pa
   expect(requests.every((url) => new URL(url).origin === new URL(page.url()).origin)).toBe(true);
 });
 
+test('@claim:no-tracking the demo makes no advertising or analytics request', async ({ page }) => {
+  const requests: string[] = []; page.on('request', (request) => requests.push(request.url()));
+  await openDemo(page);
+  await page.getByLabel('Words in message').fill('garden');
+  expect(requests.every((url) => new URL(url).origin === new URL(page.url()).origin)).toBe(true);
+});
+
 test('@claim:message-reading the sample opens a message for reading', async ({ page }) => {
   await openDemo(page);
   await page.getByRole('button', { name: 'Your first recovered message' }).click();
