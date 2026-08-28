@@ -2,8 +2,8 @@
 
 ## Release
 
-- Repair commit: `e2e0cb45d6f988c061e2282025afe18fb162f0e0` (`fix: isolate demo and close review findings`), pushed to `main`.
-- Deployed static artifact: Azure Static Web Apps deployment `7333faff-4cf7-4f43-9b1d-5581a3f5392b`.
+- Repair commits: `e2e0cb45d6f988c061e2282025afe18fb162f0e0` (`fix: isolate demo and close review findings`) and `dcd750cc026e1e224142c0f8e15e583db6c82f77` (`fix: add sized social preview metadata`), pushed to `main`.
+- Deployed static artifact: Azure Static Web Apps deployment `57e63c04-d07b-4862-9244-7b9909efe0ef`.
 - Live URL: <https://mbox-takeout-viewer.sociobot.in/demo>.
 
 ## What changed
@@ -13,6 +13,7 @@
 - Added `/demo/archive/...` and `/archive/...` URLs, history/back handling, route focus announcements, dynamic titles, a product-styled `/404`, and static-host navigation fallback.
 - Rewrote first-screen and README copy in plain language; removed unsupported implementation and browser promises while preserving the risograph archive-desk identity.
 - Added metadata, canonical/OG/Twitter tags, shared legal-page structure, sitemap routes, catalog description, copy audit, demo guide, and claim registry.
+- Added a reviewed 1200×630 social preview, cropped from the product’s original risograph artwork and recorded in the design provenance.
 - Added one observable clean-demo browser test per claim in `.factory/claims.json`.
 
 ## Verification evidence
@@ -50,7 +51,7 @@ Live release check:
 
 ```text
 verify-url.sh https://mbox-takeout-viewer.sociobot.in/demo
-HTTP 200; no console errors; one h1; lang=en; main present; no missing image alt text.
+HTTP 200 in 877 ms; no console errors; one h1; lang=en; main present; no missing image alt text.
 ```
 
 ## Known gaps
