@@ -2,7 +2,7 @@
 
 ## Release
 
-- Repair commits: `e2e0cb45d6f988c061e2282025afe18fb162f0e0` (`fix: isolate demo and close review findings`) and `dcd750cc026e1e224142c0f8e15e583db6c82f77` (`fix: add sized social preview metadata`), pushed to `main`.
+- Repair commits: `e2e0cb45d6f988c061e2282025afe18fb162f0e0` (`fix: isolate demo and close review findings`), `dcd750cc026e1e224142c0f8e15e583db6c82f77` (`fix: add sized social preview metadata`), and `d964be95e1e778c72f043759a75078add3a369e4` (`test: cover privacy tracking claim`), pushed to `main`.
 - Deployed static artifact: Azure Static Web Apps deployment `57e63c04-d07b-4862-9244-7b9909efe0ef`.
 - Live URL: <https://mbox-takeout-viewer.sociobot.in/demo>.
 
@@ -18,7 +18,7 @@
 
 ## Verification evidence
 
-From a fresh clone of repair commit `e2e0cb45d6f988c061e2282025afe18fb162f0e0`:
+From a fresh clone of repair commit `d964be95e1e778c72f043759a75078add3a369e4`:
 
 ```text
 npm ci                         passed (174 packages; 0 vulnerabilities)
