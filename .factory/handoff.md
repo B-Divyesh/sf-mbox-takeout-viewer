@@ -1,26 +1,58 @@
-# Review handoff — review 1
+# Repair handoff — perfection loop 1
 
-## Done
+## Release
 
-- Performed an adversarial first-read review of the deployed Paper Trail site at 390 px and desktop.
-- Checked the landing/sample flow, browser storage, same-origin sample requests, offline reload, links, routes, metadata, 404 behaviour, README copy, and claim-test setup.
-- Wrote the findings in `.factory/review-1.md` without modifying product code.
+- Repair commit: `e2e0cb45d6f988c061e2282025afe18fb162f0e0` (`fix: isolate demo and close review findings`), pushed to `main`.
+- Deployed static artifact: Azure Static Web Apps deployment `7333faff-4cf7-4f43-9b1d-5581a3f5392b`.
+- Live URL: <https://mbox-takeout-viewer.sociobot.in/demo>.
 
-## Verification run
+## What changed
 
-```bash
-npm ci
-npm test
-npm run build
-npm run test:e2e
-npm run test:headers
+- Replaced the prior sample action with the direct `/demo` and `?demo=1` sandbox. It selects `demo:paper-trail-index` before any database read, keeps the required banner visible, and deletes only demo storage on Reset demo or Start for real.
+- Seeded a three-message sample archive with search, filtering, reading, attachment download, and selected-email export paths.
+- Added `/demo/archive/...` and `/archive/...` URLs, history/back handling, route focus announcements, dynamic titles, a product-styled `/404`, and static-host navigation fallback.
+- Rewrote first-screen and README copy in plain language; removed unsupported implementation and browser promises while preserving the risograph archive-desk identity.
+- Added metadata, canonical/OG/Twitter tags, shared legal-page structure, sitemap routes, catalog description, copy audit, demo guide, and claim registry.
+- Added one observable clean-demo browser test per claim in `.factory/claims.json`.
+
+## Verification evidence
+
+From a fresh clone of repair commit `e2e0cb45d6f988c061e2282025afe18fb162f0e0`:
+
+```text
+npm ci                         passed (174 packages; 0 vulnerabilities)
+npm run build                  passed; dist/index.html produced
+npm test                       passed; 13 tests
+npm run test:e2e               passed; 19 passed, 1 release-only mobile skip
+npm run test:headers           passed
 ```
 
-All commands passed. The review verdict is **FAIL** because the required isolated direct demo, claims registry/tests, designed 404/deep routing, and demo documentation are absent.
+Every registry command passed individually on desktop Chromium:
 
-## Known gaps for the product team
+```text
+@claim:demo-isolation          passed
+@claim:local-network           passed
+@claim:message-reading         passed
+@claim:archive-search          passed
+@claim:email-export            passed
+@claim:attachment-download     passed
+@claim:offline-reload          passed
+```
 
-- No `.factory/claims.json` or `.factory/demo.md` exists.
-- `/demo` returns a generic host 404; `?demo=1` does not start a demo.
-- The sample writes to the production-named IndexedDB database and has no persistent demo banner/reset/start-real controls.
-- The review lists complete landing/README copy counts and unlisted claims that need tests or removal.
+Local release checks:
+
+- `verify-url.sh http://127.0.0.1:4173/demo`: HTTP 200; no console errors; title/lang/main/alt/button checks passed.
+- Playwright axe integration: no serious or critical findings on the landing screen.
+- Lighthouse mobile report: Performance 99, Accessibility 100. The generated report is ignored with other local evidence at `.factory/evidence/local/lighthouse.json`.
+- Built entry JavaScript gzip: 14.98 kB; built CSS gzip: 4.11 kB.
+
+Live release check:
+
+```text
+verify-url.sh https://mbox-takeout-viewer.sociobot.in/demo
+HTTP 200; no console errors; one h1; lang=en; main present; no missing image alt text.
+```
+
+## Known gaps
+
+No known blocking review findings remain. The static host serves unknown SPA paths through the product-styled client 404 so archive deep links continue to reload correctly.
