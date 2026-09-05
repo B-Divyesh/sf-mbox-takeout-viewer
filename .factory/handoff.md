@@ -1,3 +1,16 @@
+# Verification 7 handoff — FAIL
+
+## Latest independent verification
+
+- **Implementation reviewed:** `333d1fb09f6818d6eac3c665a257382290002d45`.
+- **Documentation reviewed:** `f86aaedefff99d888a5448af2faed52caaa2e57b`.
+- **Live URL:** <https://mbox-takeout-viewer.sociobot.in>.
+- **Verdict:** **FAIL** — three findings and one untested public claim remain. The full evidence is in [verification-7.md](verification-7.md).
+
+The deployed viewer itself and all eight registered claim commands pass. The blockers are documentation/product-contract gaps: the paid unlock lacks an exact price and clear entitlement, its public bulk-license statement has no registered claim test, and the Privacy/Terms footers lack the required version/build label. The implementation artifact is the exact live deployment; this handoff/report commit does not change it.
+
+To verify after repair, run `npm ci`, `npm test`, `npm run build`, `npm run test:headers`, `npm run test:e2e`, and every command in `.factory/claims.json`, then repeat the live demo, real-local-MBOX, offline, legal-route, and paid-boundary checks described in the verification report.
+
 # Repair 6 handoff
 
 ## Release identity
