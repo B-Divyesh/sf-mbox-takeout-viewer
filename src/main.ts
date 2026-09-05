@@ -80,7 +80,7 @@ function chrome(content: string): string {
       </div>
     </header>
     <main id="main">${content}</main>
-    <footer class="site-footer"><span>Search Gmail Takeout archives in your browser.</span><nav class="footer-links" aria-label="Legal"><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/B-Divyesh/sf-mbox-takeout-viewer" rel="noreferrer">Source (GitHub)</a></nav><small>Paper Trail · build 0ae26d0</small></footer>
+    <footer class="site-footer"><span>Search Gmail Takeout archives in your browser.</span><nav class="footer-links" aria-label="Legal"><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="https://github.com/B-Divyesh/sf-mbox-takeout-viewer" rel="noreferrer">Source (GitHub)</a></nav><small>Paper Trail · version 1.0.0</small></footer>
     <div class="toast-dock" id="toastDock" aria-live="polite" aria-atomic="true"></div>
     <div class="sr-only" id="route-announcement" aria-live="polite" aria-atomic="true"></div>
     <input class="sr-only" id="fileInput" type="file" aria-label="Choose an MBOX archive" accept=".mbox,.gz,.mbox.gz,application/mbox,application/gzip" tabindex="-1" />
@@ -103,8 +103,9 @@ function renderWelcome(): void {
     <div><p class="eyebrow">Gmail Takeout archive viewer</p><h1>Search your Gmail Takeout archive</h1>
       <p class="lede">For people finding one needed email. Read messages and export selected emails in this browser.</p>
       <ul class="promise-list"><li>Choose an archive from your device.</li><li>Search messages, sender, dates, and attachments.</li><li>Try the sample inbox before opening your own.</li></ul>
-      <div class="hero-actions"><button class="primary" data-action="open">Open your Takeout archive</button><a class="button" href="/demo" data-action="demo-link">Try it with sample data</a><button class="ghost" data-action="import-index">Open an index backup</button></div>
+      <div class="hero-actions"><button class="primary" data-action="open">Open your Takeout archive</button><a class="button" href="/demo" data-action="demo-link">Try it with sample data</a><button class="ghost" data-action="import-index">Restore a saved archive backup</button></div>
       <p class="file-note">The sample opens an inbox you can search and export.</p>
+      <p class="backup-note">Use a backup created by Paper Trail to restore its saved message list.</p>
     </div>
     <div class="hero-art-wrap"><span class="stamp">Your archive desk</span><img class="hero-art" src="/assets/hero-archive.webp" width="1152" height="768" fetchpriority="high" alt="A folded email archive passing through a hand-cranked indexer into sorted message cards" /></div>
   </section>
@@ -112,7 +113,7 @@ function renderWelcome(): void {
 }
 
 function renderNotFound(): void {
-  app.innerHTML = chrome(`<section class="indexing-card not-found"><p class="eyebrow">Missing page</p><h1>This paper trail ends here.</h1><p>That page is not part of Paper Trail.</p><a class="button primary" href="/" data-action="home">Return to your archive desk</a></section>`);
+  app.innerHTML = chrome(`<section class="indexing-card not-found"><p class="eyebrow">Missing page</p><h1>Page not found</h1><p>That page is not part of Paper Trail.</p><a class="button primary" href="/" data-action="home">Return to your archive desk</a></section>`);
 }
 
 function renderIndexing(): void {
@@ -522,6 +523,10 @@ async function openMessage(id: number, updateRoute = true): Promise<void> {
     const raw = await readRaw(record);
     state.parsed = parseMessage(raw);
     render();
+    // The first reader render is a loading state. Move focus and announce only
+    // after its message heading exists, so keyboard and screen-reader users
+    // arrive at the subject they chose rather than the document body.
+    announceRoute();
   } catch (error) {
     state.view = 'workspace'; if (state.archive) navigate(routeForArchive(state.archive), true); else render(); restoreMessageFocus(); toast(error instanceof Error ? error.message : 'Could not open this message.', 'error');
   }

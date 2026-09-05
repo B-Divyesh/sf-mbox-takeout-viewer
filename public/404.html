@@ -1,1 +1,76 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="theme-color" content="#f4eedc"><meta name="description" content="The requested Paper Trail page was not found."><link rel="icon" href="/icon.svg" type="image/svg+xml"><title>Page not found — Paper Trail</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#f4eedc;color:#17211d;font:17px/1.5 ui-monospace,monospace}main{max-width:640px;border:2px solid #24312a;background:#fffdf5;padding:clamp(28px,6vw,64px);box-shadow:8px 8px 0 #186e89}h1{margin:0;font:700 clamp(42px,8vw,70px)/1 Georgia,serif}a{display:inline-block;margin-top:18px;color:#075d76;font-weight:800}a:focus-visible{outline:4px solid #c83b2e;outline-offset:3px}</style></head><body><main><p>Missing page</p><h1>This paper trail ends here.</h1><p>That page is not part of Paper Trail.</p><a href="/">Return to your archive desk</a></main></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#f4eedc">
+    <meta name="description" content="The requested Paper Trail page was not found. Return to search a Gmail Takeout archive.">
+    <link rel="canonical" href="https://mbox-takeout-viewer.sociobot.in/404">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Page not found — Paper Trail">
+    <meta property="og:description" content="The requested Paper Trail page was not found. Return to search a Gmail Takeout archive.">
+    <meta property="og:image" content="https://mbox-takeout-viewer.sociobot.in/assets/social-preview.webp">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Page not found — Paper Trail">
+    <meta name="twitter:description" content="The requested Paper Trail page was not found. Return to search a Gmail Takeout archive.">
+    <meta name="twitter:image" content="https://mbox-takeout-viewer.sociobot.in/assets/social-preview.webp">
+    <title>Page not found — Paper Trail</title>
+    <style>
+      :root { color-scheme: light dark; --paper:#f4eedc; --sheet:#fffdf5; --ink:#17211d; --tomato:#c83b2e; --blue:#186e89; --mustard:#e6b93e; --rule:#24312a; }
+      * { box-sizing:border-box; }
+      body { min-height:100vh; margin:0; color:var(--ink); background-color:var(--paper); background-image:radial-gradient(rgb(23 33 29 / 4%) .8px,transparent .8px); background-size:6px 6px; font:16px/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
+      a { color:var(--blue); text-underline-offset:3px; }
+      a:hover { text-decoration-thickness:2px; }
+      :focus-visible { outline:4px solid var(--tomato); outline-offset:3px; }
+      .skip { position:fixed; z-index:10; top:8px; left:8px; padding:12px; color:var(--ink); border:2px solid var(--rule); background:var(--sheet); transform:translateY(-160%); }
+      .skip:focus { transform:none; }
+      .shell { min-height:100vh; display:flex; flex-direction:column; }
+      header { min-height:64px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:8px max(20px,calc((100vw - 1440px)/2)); border-bottom:2px solid var(--rule); background:color-mix(in srgb,var(--paper) 94%,transparent); }
+      .brand { display:flex; align-items:center; gap:10px; color:var(--ink); font:800 22px Georgia,'Times New Roman',serif; text-decoration:none; }
+      .brand-mark { position:relative; width:36px; height:36px; border:2px solid var(--rule); background:var(--tomato); box-shadow:3px 3px 0 var(--blue); transform:rotate(-2deg); }
+      .brand-mark::before,.brand-mark::after { position:absolute; right:6px; left:6px; height:2px; content:''; background:#fffdf5; }
+      .brand-mark::before { top:11px; box-shadow:0 6px 0 #fffdf5,0 12px 0 #fffdf5; }
+      nav { display:flex; flex-wrap:wrap; gap:12px; align-items:center; font-size:13px; font-weight:850; }
+      nav a { min-height:44px; display:inline-flex; align-items:center; }
+      main { flex:1; display:grid; place-items:center; padding:clamp(32px,7vw,92px) 24px; }
+      .lost-sheet { position:relative; width:min(720px,100%); padding:clamp(28px,6vw,64px); overflow:hidden; border:2px solid var(--rule); background:var(--sheet); box-shadow:8px 8px 0 var(--blue); }
+      .lost-sheet::before { position:absolute; top:20px; right:-30px; width:140px; height:140px; border:2px solid var(--rule); content:''; background:repeating-linear-gradient(135deg,var(--mustard) 0 8px,var(--paper) 8px 16px); transform:rotate(13deg); }
+      .lost-sheet > * { position:relative; }
+      .eyebrow { display:flex; align-items:center; gap:9px; margin:0; font-size:12px; font-weight:850; letter-spacing:.12em; text-transform:uppercase; }
+      .eyebrow::before { width:26px; height:8px; border:1px solid var(--rule); content:''; background:var(--tomato); }
+      h1 { max-width:11ch; margin:20px 0 16px; font:700 clamp(42px,8vw,70px)/1 Georgia,'Times New Roman',serif; letter-spacing:-.035em; }
+      p { max-width:52ch; margin:0 0 24px; }
+      .button { display:inline-flex; min-height:44px; align-items:center; justify-content:center; padding:9px 14px; color:#fffdf5; border:2px solid var(--rule); background:var(--tomato); box-shadow:3px 3px 0 var(--rule); font-weight:750; text-decoration:none; }
+      .button:active { box-shadow:1px 1px 0 var(--rule); transform:translate(2px,2px); }
+      footer { display:flex; flex-wrap:wrap; justify-content:space-between; gap:16px; padding:28px max(24px,calc((100vw - 1440px)/2)); border-top:2px solid var(--rule); font-size:13px; }
+      footer nav { gap:18px; }
+      @media (prefers-color-scheme:dark) { :root { --paper:#1e211d; --sheet:#292c27; --ink:#f7f0da; --tomato:#f26b5b; --blue:#59b9d1; --mustard:#e8be50; --rule:#d7dccb; } .button { color:#17211d; } }
+      @media (max-width:620px) { header { padding-inline:14px; } .brand { gap:7px; font-size:19px; } .brand-mark { width:31px; height:31px; } nav { gap:8px; font-size:12px; } footer { display:grid; } }
+      @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; transition-duration:.01ms!important; } }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to main content</a>
+    <div class="shell">
+      <header>
+        <a class="brand" href="/" aria-label="Paper Trail home"><span class="brand-mark" aria-hidden="true"></span>Paper Trail</a>
+        <nav aria-label="Primary"><a href="/demo">Demo</a><a href="/privacy/">Privacy</a></nav>
+      </header>
+      <main id="main">
+        <section class="lost-sheet" aria-labelledby="not-found-title">
+          <p class="eyebrow">Missing page</p>
+          <h1 id="not-found-title">Page not found</h1>
+          <p>That page is not part of Paper Trail. Return to choose or search an archive.</p>
+          <a class="button" href="/">Return to your archive desk</a>
+        </section>
+      </main>
+      <footer>
+        <span>Search Gmail Takeout archives in your browser.</span>
+        <nav aria-label="Legal"><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a></nav>
+        <span>Built by Param Factory · version 1.0.0</span>
+      </footer>
+    </div>
+  </body>
+</html>

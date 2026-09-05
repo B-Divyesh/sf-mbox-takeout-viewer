@@ -60,6 +60,7 @@ h1 { font-size: clamp(44px, 6vw, 82px); letter-spacing: -.035em; max-width: 13ch
 .promise-list li::before { content: '✓'; display: grid; place-items: center; flex: 0 0 24px; height: 24px; background: var(--mustard); border: 1px solid var(--rule); font-weight: 900; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
 .file-note { margin-top: 14px; font-size: 13px; color: var(--muted); }
+.backup-note { margin-top: 8px; max-width: 44ch; font-size: 13px; color: var(--muted); }
 .hero-art-wrap { position: relative; }
 .hero-art-wrap::before { content: ''; position: absolute; inset: 18px -12px -12px 18px; background: var(--blue); border: 2px solid var(--rule); transform: rotate(1.5deg); }
 .hero-art { display: block; width: 100%; height: auto; border: 2px solid var(--rule); position: relative; filter: saturate(.94) contrast(1.02); }

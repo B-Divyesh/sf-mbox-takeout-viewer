@@ -24,14 +24,34 @@ test('@claim:demo-isolation demo never opens the production database', async ({ 
   expect(namesAfterExit).not.toContain('demo:paper-trail-index');
 });
 
-test('@claim:local-network the demo sends no cross-origin requests', async ({ page }) => {
-  const requests: string[] = []; page.on('request', (request) => requests.push(request.url()));
-  await openDemo(page);
-  await page.getByLabel('Words in message').fill('recovered');
-  await expect(page.locator('.result-status')).toContainText('1 of 3 messages');
-  await page.getByRole('button', { name: 'Your first recovered message' }).click();
-  await expect(page.getByText(/Search for recovered/)).toBeVisible();
-  expect(requests.every((url) => new URL(url).origin === new URL(page.url()).origin)).toBe(true);
+test('@claim:local-network a selected archive stays local through index, search, reading, and export', async ({ page }) => {
+  const archiveName = 'private-copper-owl.mbox';
+  const archiveTerm = 'copper-owl-private-term-419';
+  const archiveBody = `From records@example.test Fri Aug 28 12:00:00 2026\r\nDate: Fri, 28 Aug 2026 12:00:00 +0000\r\nFrom: Private Records <records@example.test>\r\nTo: You <you@example.test>\r\nSubject: Copper owl records\r\nMessage-ID: <copper-owl@example.test>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${archiveTerm} is only in this selected archive.\r\n`;
+  const requests: Array<{ url: string; body: string | null }> = [];
+  page.on('request', (request) => requests.push({ url: request.url(), body: request.postData() }));
+
+  await page.goto('/');
+  await page.locator('#fileInput').setInputFiles({ name: archiveName, mimeType: 'application/mbox', buffer: Buffer.from(archiveBody) });
+  await expect(page.locator('.archive-meta')).toContainText('1 messages');
+  await page.getByLabel('Words in message').fill(archiveTerm);
+  await expect(page.locator('.result-status')).toContainText('1 of 1 messages');
+  await page.getByRole('button', { name: 'Copper owl records' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Copper owl records');
+  await expect(page.getByText(archiveTerm)).toBeVisible();
+  await page.goBack();
+  await expect(page.locator('.workspace')).toBeVisible();
+  await page.getByLabel('Select Copper owl records').check();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: /Export selected/ }).click();
+  expect((await download).suggestedFilename()).toBe(`${archiveName}-selection.zip`);
+
+  const localOrigin = new URL(page.url()).origin;
+  expect(requests).not.toEqual([]);
+  expect(requests.every((request) => new URL(request.url).origin === localOrigin)).toBe(true);
+  for (const privateValue of [archiveName, archiveTerm, archiveBody]) {
+    expect(requests.some((request) => `${request.url}\n${request.body || ''}`.includes(privateValue))).toBe(false);
+  }
 });
 
 test('@claim:no-tracking the demo makes no advertising or analytics request', async ({ page }) => {
@@ -90,13 +110,37 @@ test('routes, focus, metadata, and the designed 404 work', async ({ page }) => {
   await openDemo(page);
   await page.getByRole('button', { name: 'Your first recovered message' }).click();
   await expect(page).toHaveURL(/\/demo\/archive\/.+\/message\/0$/);
+  await expect(page.locator('main h1')).toBeFocused();
+  await expect(page.locator('#route-announcement')).toHaveText('Your first recovered message');
   await page.goBack(); await expect(page.locator('.workspace')).toBeVisible(); await expect(page.locator('main h1')).toBeFocused();
-  await page.goto('/does-not-exist'); await expect(page.getByRole('heading', { level: 1 })).toHaveText('This paper trail ends here.'); await expect(page.locator('main')).toBeVisible();
+  await page.goto('/does-not-exist'); await expect(page.getByRole('heading', { level: 1 })).toHaveText('Page not found'); await expect(page.locator('main')).toBeVisible();
   await page.goto('/privacy/'); await expect(page).toHaveTitle('Privacy — Paper Trail'); await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', /privacy/);
+});
+
+test('the static 404 has the product chrome and share metadata', async ({ page }) => {
+  await page.goto('/404.html');
+  await expect(page).toHaveTitle('Page not found — Paper Trail');
+  await expect(page.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute('href', '#main');
+  await expect(page.locator('header')).toContainText('Paper Trail');
+  await expect(page.getByRole('navigation', { name: 'Primary' })).toContainText('Demo');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Page not found');
+  await expect(page.locator('footer')).toContainText('Built by Param Factory');
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://mbox-takeout-viewer.sociobot.in/404');
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', /not found/i);
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', 'Page not found — Paper Trail');
+  await expect(page.locator('meta[property="og:description"]')).toHaveAttribute('content', /not found/i);
+  await expect(page.locator('meta[property="og:image"]')).toHaveAttribute('content', /social-preview\.webp$/);
+  await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute('content', 'summary_large_image');
+  await expect(page.locator('meta[name="twitter:title"]')).toHaveAttribute('content', 'Page not found — Paper Trail');
+  await expect(page.locator('meta[name="twitter:description"]')).toHaveAttribute('content', /not found/i);
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations.filter((item) => ['serious', 'critical'].includes(item.impact || ''))).toEqual([]);
 });
 
 test('accessibility, first screen, and mobile layout', async ({ page }, testInfo) => {
   await page.goto('/'); await expect(page.getByRole('heading', { level: 1 })).toHaveText('Search your Gmail Takeout archive'); await expect(page.getByRole('link', { name: 'Try it with sample data' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Restore a saved archive backup' })).toBeVisible();
+  await expect(page.getByText('Use a backup created by Paper Trail to restore its saved message list.')).toBeVisible();
   const results = await new AxeBuilder({ page }).analyze(); expect(results.violations.filter((item) => ['serious', 'critical'].includes(item.impact || ''))).toEqual([]);
   if (testInfo.project.name === 'mobile') expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

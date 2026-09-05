@@ -1,6 +1,6 @@
 [
   {"id":"demo-isolation","claim":"Demo — sample data, nothing is saved","where":"demo banner","test":"npm run test:e2e -- --project=desktop --grep @claim:demo-isolation","sandbox":"fresh context; confirms separate, resettable demo storage"},
-  {"id":"local-network","claim":"Your archive stays in this browser","where":"privacy policy","test":"npm run test:e2e -- --project=desktop --grep @claim:local-network","sandbox":"fresh demo flow; every request is asserted same-origin"},
+  {"id":"local-network","claim":"Your archive stays in this browser","where":"privacy policy","test":"npm run test:e2e -- --project=desktop --grep @claim:local-network","sandbox":"fresh selected-archive flow; a unique local MBOX is indexed, searched, read, and exported while every request stays same-origin and excludes its name, content, and query"},
   {"id":"no-tracking","claim":"Paper Trail has no advertising or analytics","where":"privacy policy","test":"npm run test:e2e -- --project=desktop --grep @claim:no-tracking","sandbox":"fresh demo flow; all requests are asserted same-origin"},
   {"id":"message-reading","claim":"Read messages","where":"landing and README","test":"npm run test:e2e -- --project=desktop --grep @claim:message-reading","sandbox":"fresh demo; opens a message and asserts its body"},
   {"id":"archive-search","claim":"Search messages, sender, dates, and attachments","where":"landing and archive filters","test":"npm run test:e2e -- --project=desktop --grep @claim:archive-search","sandbox":"fresh demo; search and attachment filter assert results"},

@@ -13,7 +13,9 @@
 | Try the sample inbox before opening your own. | 8 | direct next step |
 | Open your Takeout archive | 5 | result-naming action |
 | Try it with sample data | 6 | required sandbox action |
+| Restore a saved archive backup | 5 | clear secondary action |
 | The sample opens an inbox you can search and export. | 10 | action result |
+| Use a backup created by Paper Trail to restore its saved message list. | 12 | backup helper text |
 
 No sentence is over 22 words. No banned terms appear.
 
